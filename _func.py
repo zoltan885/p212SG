@@ -577,7 +577,7 @@ def showMap(fiofile, roi=None, etascale=False, save=False):
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.set_ylabel('omega angle [deg]')
-
+    
     if etascale:
         dist = 1100 # Lambda dist from direct beam [mm]
         ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
@@ -587,6 +587,22 @@ def showMap(fiofile, roi=None, etascale=False, save=False):
         ax.set_xlabel('eta [unscaled, pix]')
         plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
                          extent=[0, azimutalMap.shape[1], omega[0], omega[-1]], aspect='auto')
+
+    if save:
+        name = savedir+image.replace('.nxs', '')
+        np.save(name+'.npy', azimutalMap[:, ::-1])
+        with open(name+'.meta') as meta:
+            meta.write('File %s\n' % (name+'.npy'))
+            meta.write('Used ROI: %s\n'%roi)
+            meta.write('Omega values:\n')
+            for o in omega:
+                meta.write('%.4f\n'%o)
+            meta.write('Radial pixels on the Lambda and rough eta in mdeg calculated with %.2f mm distance from the direct beam\n')
+            for i in range(azimutalMap.shape[1]):
+                meta.write('%i %.2f'%(i,1000*i*0.055/dist))
+            
+    
+    
     fig.colorbar(plot)
     plt.show()
 
