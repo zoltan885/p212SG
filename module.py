@@ -193,6 +193,7 @@ class Grain(object):
         self._rotpos = [M.devs['mot_rot']['dev'].position]
         
         self.roi = None
+        self.Lroi =None
         
         # some magic to get the spock names of the moveable devices so that later they can be used by spock macros like mv
         self.moveable_spock_names = _func._getMoveableSpockNames()
@@ -244,12 +245,24 @@ class Grain(object):
         time.sleep(0.1)
         self.M.Lambda.SaveAllImages = True
         time.sleep(0.1)
-            
-        positions, self.roi = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+        if channel == 1:
+            if not self.roi:
+                positions, self.roi = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+            else:
+                positions, _ = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                   channel=channel, roi=self.roi)
+        if channel == 3:
+            if not self.Lroi:
+                positions, self.Lroi = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                   channel=channel, roi=self.Lroi)
+            if self.Lroi:
+                positions, _ = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                    channel=channel, roi=self.Lroi)
+
         #self.new_pos()
 
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, ):
+    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1):
         # move slits:
             
         if channel == 3:
@@ -259,8 +272,19 @@ class Grain(object):
         time.sleep(0.1)
         self.M.Lambda.SaveAllImages = True
         time.sleep(0.1)
-        
-        positions, self.roi = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+        if channel == 1:
+            if not self.roi:
+                positions, self.roi = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+            else:
+                positions, _ = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                   channel=channel, roi=self.roi)
+        if channel == 3:
+            if not self.Lroi:
+                positions, self.Lroi = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                   channel=channel, roi=self.Lroi)
+            else:
+                positions, _ = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+                                                    channel=channel, roi=self.Lroi)
         #self.new_pos()
 
     def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1):
@@ -275,19 +299,31 @@ class Grain(object):
         time.sleep(0.1)
         self.M.Lambda.SaveAllImages = True
         time.sleep(0.1)
-            
-        if not self.roi:
-            cen, self.roi = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
-        else:
-            cen,_ = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
+
+        if channel == 1:
+            if not self.roi:
+                cen, self.roi = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
+            else:
+                cen,_ = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
+        if channel == 3:
+            if not self.Lroi:
+                cen, self.Lroi = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
+            else:
+                cen, _ = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
         
         #self.new_pos()
 
 
-    def redef_ROI(self, imsource):
-        self.roi, _ = _func.explorer(imsource)
+    def redef_ROI(self, imsource, channel=1):
+        if channel == 1:
+            self.roi, _ = _func.explorer(imsource)
+        if channel == 3:
+            self.Lroi, _ = _func.explorer(imsource)
         
-        
+
+    def showMap(self, fiofile):
+        _func.showMap(fiofile, 3, self.Lroi)
+
         
         
         
