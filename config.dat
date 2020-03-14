@@ -1,0 +1,15 @@
+# This is an automatically generated measurement configuration file for single grain diffraction measurements
+# This file contains the name of the necessary devices. The device instance has to be filled.
+# The user may define new devices following the syntax:
+# dev_name: instance(with full path)
+# Alternatively local spock names may also be used
+# Comment lines begin with hashtag and empty lines are discarded.
+
+# horizontal motor
+#mot_hor: hasep21eh3:10000/p21/motor/eh3_u1.05
+mot_hor: idty2
+# vertical motor
+#mot_ver: hasep21eh3:10000/p21/motor/eh3_u1.06
+mot_ver: idtz2
+# omega rotation motor
+mot_rot: idrz1
