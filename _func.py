@@ -143,7 +143,7 @@ def explorer(imsource, ROI=False):
     
     TODO:
         could work with keybord
-        if ROI is already given it should only show the ROIs
+        if ROI is already given it should show a rectangle
     """
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
@@ -294,7 +294,6 @@ def _readFastsweepLog(filename):
 
 
 def getDataNXSLambda(filename):
-    print('This is getDataNXSLambda: ' + filename)
     try:
         import h5py
     except:
@@ -533,5 +532,64 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     cen = fitGauss(scanFileName, roi, positions)    
 
     return cen, roi
-    
+
+
+def getProj(imageArray, roi, projAxis=0):
+    '''
+    vertical projection: axis = 0
+    horizontal projection: axis = 1
+    '''
+    projections = []
+    # the numpy convention is different than the PIL therefore the image is transposed(?)
+    xmin = roi['ymin']
+    xmax = roi['ymax']
+    ymin = roi['xmin']
+    ymax = roi['xmax']
+    for i in range(imageArray.shape[0]):
+        im = imageArray[i, xmin:xmax, ymin:ymax]
+        projections.append(np.sum(im, axis=projAxis))
+    return np.array(projections)
+
+
+def showMap(fiofile, roi=None, etascale=False, save=False):
+    '''
+    creates a map from an already existing measurement
+    '''
+
+    d, savedir = _fioparser(fiofile)
+    omega = np.array(d['idrz1(encoder)'])
+    omega += (omega[1]-omega[0])/2. # shifting the omega, because the only the starting angles are saved
+
+    image = imagesFromFio(fiofile, channel=3)
+    if not isinstance(image, str):
+        raise ValueError('fio file contains several images... Supposed to be a single nxs file')
+    if not image.endswith('.nxs'):
+        raise ValueError('fio file does not point to an nxs file')
+    imageArray = getDataNXSLambda(image)
+
+    if roi is None:
+        roi, roiNP = explorer(fiofile, ROI=False)
+
+    print("Using roi: %s"%roi)
+
+    azimutalMap = getProj(imageArray, roi, projAxis=0)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_ylabel('omega angle [deg]')
+
+    if etascale:
+        dist = 1100 # Lambda dist from direct beam [mm]
+        ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
+                         extent=[0, 1000*azimutalMap.shape[1]*0.055/dist, omega[0], omega[-1]], aspect='auto')
+    else:
+        ax.set_xlabel('eta [unscaled, pix]')
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
+                         extent=[0, azimutalMap.shape[1], omega[0], omega[-1]], aspect='auto')
+    fig.colorbar(plot)
+    plt.show()
+
+
+
 
