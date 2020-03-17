@@ -392,10 +392,20 @@ def getIntensities(imsource, roi):
 
 
 def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
+    '''
+    TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
+    :param imsource:
+    :param roi:
+    :param positions:
+    :param show:
+    :param gotoButton:
+    :return:
+    '''
     try:
         from lmfit.models import GaussianModel, LinearModel
+        from matplotlib.widgets import Button
     except:
-        raise ImportError('Could not import lmfit.models')
+        raise ImportError('gitGauss func: could not import...')
     
     y = getIntensities(imsource, roi)
     #x = np.arange(len(y))
@@ -415,7 +425,7 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
     #print(pars)
     
     result = mod.fit(y, pars, x=x)
-    
+    move = False
     if result.success:
         cen = result.best_values['peak_center']
 #        cen_err = pars['peak_center'].stderr
@@ -433,28 +443,54 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
         # fwhm larger than half the range
         if fwhm > 0.5*scanRange:
             sane = False
-        
-        
-        if show:
-            result.plot_fit(numpoints=200)
-            plt.axvline(x=cen)
-            plt.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
-            plt.show()
+
         print('center: %.3f\nfwhm: %.3f' % (cen, fwhm))
-        return cen
+        # 2nd try
+        if show:
+            fig = plt.figure()
+            ax = plt.subplot(111)
+            fig.subplots_adjust(left=0.25, bottom=0.25)
+            result.plot_fit(ax=ax, numpoints=200)
+            def moveto():
+                move = True
+                plt.close(fig)
+            axmoveto = plt.axes([0.05, 0.7, 0.1, 0.075])
+            movetoButton = Button(axmoveto, 'Moveto')
+            movetoButton.on_clicked(moveto)
+            plt.show(block=True)
+
+        #if show:
+        #    result.plot_fit(numpoints=200)
+        #    plt.axvline(x=cen)
+        #    plt.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
+        #    plt.show()
+
+        return {'cen': cen, 'fwhm': fwhm, 'moveto': moveto}
     else:
         raise ValueError('Fitting did not work')
 
 
 
 
-
 def center(direction, start, end, NoSteps, rotstart, rotend, 
-           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None):
+           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
     logs the result -- no it does not!
+    :param direction:
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param rotstart:
+    :param rotend:
+    :param exposure:
+    :param channel:
+    :param horizontalCenteringMotor:
+    :param verticalCenteringMotor:
+    :param roi:
+    :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
+    :return:
     '''
 
     horizontal = ['horizontal', 'hor', 'h', 'y']
@@ -500,12 +536,23 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    fitGauss(scanFileName, roi, positions)    
+    res = fitGauss(scanFileName, roi, positions, show=not auto)
 
-    return positions, roi
+    return positions, res, roi, scanFileName
 
 
-def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)'):
+def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)', auto=False):
+    '''
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param exposure:
+    :param channel:
+    :param roi:
+    :param mot:
+    :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
+    :return:
+    '''
     envlist = HU.runMacro('lsenv')
     ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
     ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
@@ -529,9 +576,9 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    cen = fitGauss(scanFileName, roi, positions)    
+    res = fitGauss(scanFileName, roi, positions, show= not auto)
 
-    return cen, roi
+    return positions, res, roi, scanFileName
 
 
 def getProj(imageArray, roi, projAxis=0):
