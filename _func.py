@@ -26,20 +26,21 @@ DEBUG = 1
 
 
 
-def _getMoveableSpockNames():
+def _getMovableSpockNames():
     '''
-       gets the stepping_motor devices 
+       gets the stepping_motor devices
     '''
     try:
         import PyTango as PT, HasyUtils as HU
     except(ImportError):
         print('Could not import modules PyTango and HasyUtils')
         return -1
-    
+
     names=dict()
     try:
         for rec in HU.getOnlineXML():
-            if rec['type'].lower() == 'stepping_motor':
+            # the phy_motion is type_tango
+            if rec['type'].lower() == 'stepping_motor' or rec['type'].lower() == 'type_tango':
                 names[rec['name'].lower()] = rec['device'].lower()
     except:
         pass
@@ -50,7 +51,7 @@ def _getMoveableSpockNames():
 
 def _fioparser(fn=None):
     if fn is None:
-        raise ValueError    
+        raise ValueError
     lines = open(fn).read().splitlines()
     comment = []
     parameter = []
@@ -62,7 +63,7 @@ def _fioparser(fn=None):
     p = lines.index('%p')
     d = lines.index('%d')
     e = len(lines)-1
-    
+
     for l in range(len(lines)):
         if lines[l].startswith('! Acquisition ended'):
             e = l
@@ -79,18 +80,18 @@ def _fioparser(fn=None):
                             columns.append(lines[l].split()[2])
                         else: # this can handle multi-word column names
                             columns.append(' '.join(lines[l].split()[2:-1]))
-                        
+
                         cdatatype.append(lines[l].split()[-1])
                     else:
                         if 'exposure' in lines[l]: # poorly written filter for exposure frames
                             datatmp.append([i for i in lines[l].split()])
-                        
+
     for i in range(len(columns)):
         if cdatatype[i].lower() in ['float', 'double']:
             data[columns[i]] = np.array(np.array(datatmp)[:,i], dtype=float)
         if cdatatype[i].lower() in ['string', 'integer']:
             data[columns[i]] = np.array(np.array(datatmp)[:,i], dtype=str)
-    
+
     command = comment[0]
     #print('Command: ', command)
     user = comment[1].split(' ')[1]
@@ -102,7 +103,7 @@ def _fioparser(fn=None):
         if 'filedir' in i.lower() or 'filepath' in i.lower() or 'downloaddirectory' in i.lower():
             channelNo = int(i.lower().partition('_')[0][-1])
             savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
-    
+
     return data, savedir
 
 
@@ -122,7 +123,7 @@ def imagesFromFio(fiofile, channel=1):
                 #while not number.isdigit():
                 #    number = number[1:]
                 #fn = fn.replace(str(number), '%05i'%(int(number)))
-                ###########################################    
+                ###########################################
                 files.append(savedir[str(channel)] + fn)
     return files
 
@@ -140,14 +141,14 @@ def explorer(imsource, ROI=False):
     """
     function for initial grain hunt
     shows the list of images with a slider to inspect them individually
-    
+
     TODO:
         could work with keybord
         if ROI is already given it should show a rectangle
     """
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
-    
+
     tif,nxs = False,False
     if isinstance(imsource, list):
         imageList = imsource
@@ -158,23 +159,23 @@ def explorer(imsource, ROI=False):
             data = getDataNXSLambda(imsource)
             nxs = True
             if DEBUG: print('Nexus file')
-        
+
         elif imsource.endswith('.fio'):
             il = imagesFromFio(imsource)
             print(il)
             if isinstance(il, str):
                 if il.endswith('nxs'):
                     data = getDataNXSLambda(il)
-                    nxs = True 
+                    nxs = True
             elif isinstance(il, list):
                 imageList = il
                 tif = True
     else:
         raise ValueError('Source format not recognized.')
-    
-    
+
+
     #if tif and DEBUG: print(imageList)
-    
+
     # generate figure
     fig = plt.figure()
     ax = plt.subplot(111)
@@ -187,7 +188,7 @@ def explorer(imsource, ROI=False):
     if nxs:
         im = np.array(data[0])
         ax.set_title(0)
-    
+
     # display image
     plot = ax.imshow(im, cmap='jet')
     # define sliders
@@ -200,10 +201,10 @@ def explorer(imsource, ROI=False):
         fig.canvas.draw()
     smin.on_changed(updateColor)
     smax.on_changed(updateColor)
-    
+
     if tif: noImages = len(imageList)
     if nxs: noImages = data.shape[0]
-    
+
     ax2 = fig.add_axes([0.25, 0.05, 0.65, 0.03], facecolor='lightgoldenrodyellow')
     imSlider = Slider(ax2, 'image', 0, noImages - 1, valinit=0, valfmt='%i')
     def updateImage(val):
@@ -213,14 +214,14 @@ def explorer(imsource, ROI=False):
             ax.set_title(imageList[indx].rpartition('/')[2])
         if nxs:
             im = data[indx]
-            ax.set_title(indx)  
+            ax.set_title(indx)
         #print('Update image to %s' % (imageList[indx]))
-        
+
         plot.set_data(im)
         fig.canvas.draw()
 
     imSlider.on_changed(updateImage)
-    
+
     def zmax(event):
         '''
         the projection should only be done for the first time,
@@ -235,11 +236,11 @@ def explorer(imsource, ROI=False):
                 sumi = np.maximum(sumi, data[i])
         ax.set_title('Z project max')
         plot.set_data(sumi)
-   
+
     axproj = plt.axes([0.05, 0.8, 0.1, 0.075])
     bproj = Button(axproj, 'Zmax')
     bproj.on_clicked(zmax)
-    
+
     def zave(event):
         avei = np.zeros_like(im)
         if tif:
@@ -248,15 +249,15 @@ def explorer(imsource, ROI=False):
         if nxs:
             for i in noImages:
                 avei = np.sum(avei, data[i], axis=0)
-            
+
         avei = avei / len(imageList)
         ax.set_title('Z average')
         plot.set_data(avei)
-        
+
     axave = plt.axes([0.05, 0.7, 0.1, 0.075])
     bave = Button(axave, 'Zave')
     bave.on_clicked(zave)
-    
+
     # ROI definition
     limits={'xmin':0, 'xmax':10000, 'ymin':0, 'ymax':10000}
     def on_xlims_change(axes):
@@ -270,8 +271,8 @@ def explorer(imsource, ROI=False):
         #print("updated ylims: ", ax.get_ylim())
     ax.callbacks.connect('xlim_changed', on_xlims_change)
     ax.callbacks.connect('ylim_changed', on_ylims_change)
-    
-    plt.show(block=True) 
+
+    plt.show(block=True)
     # catch ROI
     limitsNP = {'xmin':limits['ymin'], 'xmax':limits['ymax'], 'ymin':limits['xmin'], 'ymax':limits['xmax']}
     return limits, limitsNP
@@ -286,14 +287,17 @@ def _readFastsweepLog(filename):
     # drop the clearing frames
     log = np.array([i for i in log if i[2]=='r'], dtype=log.dtype)
     print(log)
-    
+
     # determining the average encoder position for every image
     avepos = (log['encoder_end_position']+log['encoder_start_position'])/2
     # determining the average motor position for every image (111111 is the encoder conversion factor)
     avemotpos = avepos/111111
 
 
-def getDataNXSLambda(filename):
+def getDataNXSLambda(filename, seq=None):
+    '''
+    seq is the sequence of the exposure types to dispose 'garbage' frames
+    '''
     try:
         import h5py
     except:
@@ -301,6 +305,13 @@ def getDataNXSLambda(filename):
 
     nxs = h5py.File(filename)
     data = np.array(nxs['entry/instrument/detector/data'])
+    filtered_data = []
+    if seq:
+        for i,s in enumerate(seq):
+            print(s)
+            if s == 'exposure':
+                filtered_data.append(data[i])
+        data = filtered_data
     return data
 
 
@@ -334,7 +345,7 @@ def integrateROI(data, ROI, dark=None, show=False):
         img = subtractDark(img, dark)
     # the index variables are swapped, because PIL and np.array does not define them the same way
     #img = img.transpose()
-    
+
     # the numpy convention is different than the PIL therefore the image is transposed
     xmin = ROI['ymin']
     xmax = ROI['ymax']
@@ -344,8 +355,8 @@ def integrateROI(data, ROI, dark=None, show=False):
     if show:
         im = img[xmin:xmax, ymin:ymax]
         fig, ax = plt.subplots()
-        ax.imshow(im, vmin=0, vmax=im.max()/5, cmap='jet')    
-        plt.show()   
+        ax.imshow(im, vmin=0, vmax=im.max()/5, cmap='jet')
+        plt.show()
     return np.mean(img[xmin:xmax, ymin:ymax])
 
 
@@ -361,22 +372,22 @@ def getIntensities(imsource, roi):
             data = getDataNXSLambda(imsource)
             nxs = True
             if DEBUG: print('Nexus file')
-        
+
         elif imsource.endswith('.fio'):
             il = imagesFromFio(imsource)
             print(il)
             if isinstance(il, str):
                 if il.endswith('nxs'):
                     data = getDataNXSLambda(il)
-                    nxs = True 
+                    nxs = True
             elif isinstance(il, list):
                 imageList = il
                 tif = True
     else:
         raise ValueError('Source format not recognized.')
-    
+
     print(':getIntensities: tif/nxs' , tif, nxs)
-    
+
     intensities = []
     if tif:
         for i in imageList:
@@ -386,17 +397,27 @@ def getIntensities(imsource, roi):
         for i in range(data.shape[0]):
             im = data[i]
             intensities.append(integrateROI(im, roi))
-    
+
     return np.array(intensities)
 
 
 
 def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
+    '''
+    TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
+    :param imsource:
+    :param roi:
+    :param positions:
+    :param show:
+    :param gotoButton:
+    :return:
+    '''
     try:
         from lmfit.models import GaussianModel, LinearModel
+        from matplotlib.widgets import Button
     except:
-        raise ImportError('Could not import lmfit.models')
-    
+        raise ImportError('gitGauss func: could not import...')
+
     y = getIntensities(imsource, roi)
     #x = np.arange(len(y))
     x = positions
@@ -404,18 +425,18 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
     lmod = LinearModel(prefix='line_')
 
     print(len(x), len(y))
-    
+
     pars = gmod.guess(y, x=x)
     pars += lmod.guess(y, x=x)
     # peak_center parameter is restricted to the data region
     #pars['peak_center'].set(x[np.argmax(y)], min = np.min(x), max = np.max(x))
     mod = lmod + gmod
-    
+
     #print(x, y)
     #print(pars)
-    
+
     result = mod.fit(y, pars, x=x)
-    
+    move = False
     if result.success:
         cen = result.best_values['peak_center']
 #        cen_err = pars['peak_center'].stderr
@@ -433,28 +454,57 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
         # fwhm larger than half the range
         if fwhm > 0.5*scanRange:
             sane = False
-        
-        
-        if show:
-            result.plot_fit(numpoints=200)
-            plt.axvline(x=cen)
-            plt.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
-            plt.show()
+
         print('center: %.3f\nfwhm: %.3f' % (cen, fwhm))
-        return cen
+        # 2nd try
+        if show:
+            fig = plt.figure()
+            ax = plt.subplot(111)
+            fig.subplots_adjust(left=0.25, bottom=0.25)
+            result.plot_fit(ax=ax, numpoints=200)
+            ax.axvline(x=cen)
+            ax.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
+            ax.set_title(imsource)
+            def moveto(self):
+
+                plt.close(fig)
+            axmoveto = plt.axes([0.05, 0.7, 0.1, 0.075])
+            movetoButton = Button(axmoveto, 'Moveto')
+            movetoButton.on_clicked(moveto)
+            plt.show(block=True)
+
+        #if show:
+        #    result.plot_fit(numpoints=200)
+        #    plt.axvline(x=cen)
+        #    plt.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
+        #    plt.show()
+
+        return {'cen': cen, 'fwhm': fwhm, 'moveto': move}
     else:
         raise ValueError('Fitting did not work')
 
 
 
 
-
-def center(direction, start, end, NoSteps, rotstart, rotend, 
-           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None):
+def center(direction, start, end, NoSteps, rotstart, rotend,
+           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
     logs the result -- no it does not!
+    :param direction:
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param rotstart:
+    :param rotend:
+    :param exposure:
+    :param channel:
+    :param horizontalCenteringMotor:
+    :param verticalCenteringMotor:
+    :param roi:
+    :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
+    :return:
     '''
 
     horizontal = ['horizontal', 'hor', 'h', 'y']
@@ -468,70 +518,81 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
         return -1
     #
     # get current idrz2 motor pos
-    d = _getMoveableSpockNames()
+    d = _getMovableSpockNames()
     centeringMotDev = PT.DeviceProxy(d[mot])
     centeringMotInitPos = centeringMotDev.position
-    
+
     print('initial %s motor position: %.3f' % (mot, centeringMotInitPos))
-    
+
     envlist = HU.runMacro('lsenv')
     ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
     ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
     ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
-    
+
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    
+
     supersweepCommand = 'supersweep %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
     print(supersweepCommand)
-    
 
-    
+
+
     supersweepOut = HU.runMacro(supersweepCommand)
     time.sleep(0.1)
     fiodata, path = _fioparser(scanFileName)
-    path = path['%d' % channel] 
-    
+    path = path['%d' % channel]
+
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
-    
+
 
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    fitGauss(scanFileName, roi, positions)    
+    res = fitGauss(scanFileName, roi, positions, show=not auto)
 
-    return positions, roi
+    return positions, res, roi, scanFileName
 
 
-def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)'):
+def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)', auto=False):
+    '''
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param exposure:
+    :param channel:
+    :param roi:
+    :param mot:
+    :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
+    :return:
+    '''
     envlist = HU.runMacro('lsenv')
     ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
     ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
     ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
-    
+
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
     sweepCommand = 'fastsweep idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
     print(sweepCommand)
-    
-    
+
+
     sweepOut = HU.runMacro(sweepCommand)
     time.sleep(0.1)
     fiodata, path = _fioparser(scanFileName)
-    path = path['%d' % channel] 
-    
+    path = path['%d' % channel]
+
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
-    
+
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    cen = fitGauss(scanFileName, roi, positions)    
+    res = fitGauss(scanFileName, roi, positions, show= not auto)
 
-    return cen, roi
+    return positions, res, roi, scanFileName
 
 
 def getProj(imageArray, roi, projAxis=0):
@@ -551,7 +612,7 @@ def getProj(imageArray, roi, projAxis=0):
     return np.array(projections)
 
 
-def showMap(fiofile, roi=None, etascale=False, save=False):
+def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
     '''
     creates a map from an already existing measurement
     '''
@@ -577,19 +638,21 @@ def showMap(fiofile, roi=None, etascale=False, save=False):
     fig = plt.figure()
     ax = fig.add_subplot(111)
     ax.set_ylabel('omega angle [deg]')
-    
+    ax.set_title('%s' % fiofile)
+
     if etascale:
         dist = 1100 # Lambda dist from direct beam [mm]
         ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
-        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
+
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, 1000*azimutalMap.shape[1]*0.055/dist, omega[0], omega[-1]], aspect='auto')
     else:
         ax.set_xlabel('eta [unscaled, pix]')
-        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
-                         extent=[0, azimutalMap.shape[1], omega[0], omega[-1]], aspect='auto')
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
+                         extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect='auto')
 
     if save:
-        name = savedir+image.replace('.nxs', '')
+        name = savedir['3']+image.replace('.nxs', '')
         np.save(name+'.npy', azimutalMap[:, ::-1])
         with open(name+'.meta') as meta:
             meta.write('File %s\n' % (name+'.npy'))
@@ -600,12 +663,24 @@ def showMap(fiofile, roi=None, etascale=False, save=False):
             meta.write('Radial pixels on the Lambda and rough eta in mdeg calculated with %.2f mm distance from the direct beam\n')
             for i in range(azimutalMap.shape[1]):
                 meta.write('%i %.2f'%(i,1000*i*0.055/dist))
-            
-    
-    
+
+
+
     fig.colorbar(plot)
     plt.show()
 
+'''
+def evalCentering(fiofile, roi=None):
+    fiodata, path = _fioparser(scanFileName)
+    path = path['%d' % channel]
+
+    # get ROI:
+    if roi is None:
+        roi, roiNP = explorer(fiofile)
+
+    positions = fiodata[mot]
+    if DEBUG: print('Positions: %d' % len(positions))
 
 
-
+    res = fitGauss(fiofile, roi=roi, positions, show= not auto)
+'''
