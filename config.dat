@@ -6,10 +6,14 @@
 # Comment lines begin with hashtag and empty lines are discarded.
 
 # horizontal motor
-#mot_hor: hasep21eh3:10000/p21/motor/eh3_u1.05
 mot_hor: idty2
 # vertical motor
-#mot_ver: hasep21eh3:10000/p21/motor/eh3_u1.06
 mot_ver: idtz2
 # omega rotation motor
 mot_rot: idrz1
+# far field detector y motor
+ff_det_mot_hor: phymo_portal2_y
+# far field detector z motor
+ff_det_mot_ver: phymo_portal2_z
+# auxiliary devices (e.g. slits) for logging (spock names separated by spaces):
+aux: eh3st eh3sb eh3so eh3si
