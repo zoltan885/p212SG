@@ -14,8 +14,11 @@ Created on Thu Mar  5 14:29:20 2020
 
 DEBUG = True
 
-import PyTango as PT
-import HasyUtils as HU
+try:
+    import PyTango as PT
+    import HasyUtils as HU
+except ImportError:
+    print('Could not import PyTango & HasyUtils')
 import sys, os
 
 import numpy as np
@@ -483,7 +486,7 @@ class Grain(object):
 
 
 
-    def redef_ROI(self, imsource=None, channel):
+    def redef_ROI(self, imsource=None, channel=None):
         '''
         TODO: this should watch out if the right channel is given,
         currently it can not, because the explorer does not report which detector it used

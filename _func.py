@@ -18,8 +18,8 @@ import os, time
 try:
     import PyTango as PT
     import HasyUtils as HU
-except:
-    raise ImportError('Could not import PyTango or HasyUtils')
+except ImportError:
+    print('WARNING! Could not import PyTango & HasyUtils')
 
 
 DEBUG = 1
@@ -49,7 +49,12 @@ def _getMovableSpockNames():
 
 
 
-def _fioparser(fn=None):
+def _fioparser(fn=None, onlyexp=True):
+    '''
+    :param fn: fio file
+    :param onlyexp: if true it only returns the exposure frames
+    :return:
+    '''
     if fn is None:
         raise ValueError
     lines = open(fn).read().splitlines()
@@ -83,7 +88,10 @@ def _fioparser(fn=None):
 
                         cdatatype.append(lines[l].split()[-1])
                     else:
-                        if 'exposure' in lines[l]: # poorly written filter for exposure frames
+                        if onlyexp:
+                            if 'exposure' in lines[l]: # poorly written filter for exposure frames
+                                datatmp.append([i for i in lines[l].split()])
+                        else:
                             datatmp.append([i for i in lines[l].split()])
 
     for i in range(len(columns)):
@@ -308,7 +316,6 @@ def getDataNXSLambda(filename, seq=None):
     filtered_data = []
     if seq:
         for i,s in enumerate(seq):
-            print(s)
             if s == 'exposure':
                 filtered_data.append(data[i])
         data = filtered_data
@@ -402,13 +409,13 @@ def getIntensities(imsource, roi):
 
 
 
-def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
+def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
     '''
     TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
-    :param imsource:
-    :param roi:
-    :param positions:
-    :param show:
+    :param scanFileName: fio file of the scan to fit
+    :param roi: ROI to use for integration
+    :param motor: motor name to get positions from fio file
+    :param show: if true it shows the fit
     :param gotoButton:
     :return:
     '''
@@ -418,18 +425,37 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
     except:
         raise ImportError('gitGauss func: could not import...')
 
-    y = getIntensities(imsource, roi)
-    #x = np.arange(len(y))
-    x = positions
+    fiodata, path = _fioparser(scanFileName)
+    ya = getIntensities(scanFileName, roi) # here we also read back every clearing frame from the beamline file system, not good
+    # filtering for exposure frames
+    x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
+    # one would need to know if this was a supersweep or a fastsweep
+    # if it was a fastsweep then x needs to be incremented by half the stepsize (this is temporary, eventually the end position will be implemented in the fio)
+    y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
+
+    print(x)
+    print(y)
+
     gmod = GaussianModel(prefix='peak_')
     lmod = LinearModel(prefix='line_')
 
     print(len(x), len(y))
 
-    pars = gmod.guess(y, x=x)
-    pars += lmod.guess(y, x=x)
-    # peak_center parameter is restricted to the data region
-    #pars['peak_center'].set(x[np.argmax(y)], min = np.min(x), max = np.max(x))
+    try:
+        pars = gmod.guess(y, x=x)
+        pars += lmod.guess(y, x=x)
+    except:
+        print('Automatic parameter guess failed')
+        pars = gmod.make_params()
+        pars += lmod.make_params()
+        # peak_center parameter is restricted to the data region
+        pars['peak_center'].set(x[np.argmax(y)], min = np.min(x), max = np.max(x))
+        pars['peak_amplitude'].set(np.max(y)-np.min(y))
+        pars['peak_sigma'].set(0.2*(np.max(x)-np.min(x)))
+        pars['line_slope'].set((y[-1]-y[0])/(x[-1]-x[0]))
+        pars['line_intercept'].set(np.min(y))
+
+
     mod = lmod + gmod
 
     #print(x, y)
@@ -441,15 +467,15 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
         cen = result.best_values['peak_center']
 #        cen_err = pars['peak_center'].stderr
         amp = result.best_values['peak_amplitude']
-        fwhm = 2.3557*result.best_values['peak_sigma']
+        fwhm = 2.35482*result.best_values['peak_sigma']
         # sanity check
         sane = True
-        scanRange = (np.max(positions)-np.min(positions))
+        scanRange = (np.max(x)-np.min(x))
         # closer than 10% to the min
-        if cen < np.min(positions)+0.1*scanRange:
+        if cen < np.min(x)+0.1*scanRange:
             sane = False
         # closer than 10% to the max
-        if cen > np.max(positions)-0.1*scanRange:
+        if cen > np.max(x)-0.1*scanRange:
             sane = False
         # fwhm larger than half the range
         if fwhm > 0.5*scanRange:
@@ -464,7 +490,9 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
             result.plot_fit(ax=ax, numpoints=200)
             ax.axvline(x=cen)
             ax.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
-            ax.set_title(imsource)
+            ax.set_xlabel(motor)
+            ax.set_ylabel('Intensity')
+            ax.set_title(scanFileName+'\n'+str(roi))
             def moveto(self):
 
                 plt.close(fig)
@@ -481,7 +509,7 @@ def fitGauss(imsource, roi, positions, show=True, gotoButton=True):
 
         return {'cen': cen, 'fwhm': fwhm, 'moveto': move}
     else:
-        raise ValueError('Fitting did not work')
+        raise ValueError('Fit did not work')
 
 
 
@@ -528,6 +556,9 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
     ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
     ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
+    #ScanDir = HU.getEnv('ScanDir')
+    #ScanID = HU.getEnv('ScanID')
+    #ScanFile = HU.getEnv('ScanFile')
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
@@ -550,7 +581,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    res = fitGauss(scanFileName, roi, positions, show=not auto)
+    res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
 
     return positions, res, roi, scanFileName
 
@@ -571,6 +602,9 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
     ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
     ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
+    #ScanDir = HU.getEnv('ScanDir')
+    #ScanID = HU.getEnv('ScanID')
+    #ScanFile = HU.getEnv('ScanFile')
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
@@ -590,7 +624,7 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
 
-    res = fitGauss(scanFileName, roi, positions, show= not auto)
+    res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
 
     return positions, res, roi, scanFileName
 
