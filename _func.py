@@ -157,7 +157,7 @@ def explorer(imsource, ROI=False):
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
 
-    tif,nxs = False,False
+    tif,nxs,fio = False,False,False
     if isinstance(imsource, list):
         imageList = imsource
         tif = True
@@ -169,6 +169,8 @@ def explorer(imsource, ROI=False):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
+            fiodata, savedir = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fio = True
             il = imagesFromFio(imsource)
             print(il)
             if isinstance(il, str):
@@ -189,13 +191,36 @@ def explorer(imsource, ROI=False):
     ax = plt.subplot(111)
     fig.subplots_adjust(left=0.25, bottom=0.25)
 
+    # get image positions if the source is a fio file
+    positions = None
+    if fio:
+        # fastsweep:
+        if len(fiodata.keys()) == 6:
+            positions = fiodata['idrz1(encoder)']
+            positions += (positions[1]-positions[0])/2
+        # supersweep
+        elif len(fiodata.keys()) == 7:
+            for k in fiodata.keys():
+                if k not in ['idrz1(encoder)', 'type', 'filename', 'end pos', 'unix time', 'channel']:
+                    positions = fiodata[k]
+
+
     # select first image
     if tif:
         im = np.array(Image.open(imageList[0]))
+        if positions is not None:
+            ax.set_title(imageList[0].rpartition('/')[2] + ': %.4f'%positions[0])
+        else:
+            ax.set_title(imageList[0].rpartition('/')[2])
         ax.set_title(imageList[0].rpartition('/')[2])
     if nxs:
         im = np.array(data[0])
-        ax.set_title(0)
+        if positions is not None:
+            ax.set_title('0: %.4f'%positions[0])
+        else:
+            ax.set_title(0)
+
+
 
     # display image
     plot = ax.imshow(im, cmap='jet')
@@ -219,7 +244,10 @@ def explorer(imsource, ROI=False):
         indx = int(np.round(val))
         if tif:
             im = np.array(Image.open(imageList[indx]))
-            ax.set_title(imageList[indx].rpartition('/')[2])
+            if positions is not None:
+                ax.set_title(imageList[indx].rpartition('/')[2] + ': %.4f'%positions[indx])
+            else:
+                ax.set_title(imageList[indx].rpartition('/')[2])
         if nxs:
             im = data[indx]
             ax.set_title(indx)
@@ -552,13 +580,18 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
 
     print('initial %s motor position: %.3f' % (mot, centeringMotInitPos))
 
-    envlist = HU.runMacro('lsenv')
-    ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
-    ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
-    ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
-    #ScanDir = HU.getEnv('ScanDir')
-    #ScanID = HU.getEnv('ScanID')
-    #ScanFile = HU.getEnv('ScanFile')
+    #envlist = HU.runMacro('lsenv')
+    #ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
+    #ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
+    #ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
+    ScanDir = HU.getEnv('ScanDir')
+    ScanID = HU.getEnv('ScanID')
+    ScanFile = HU.getEnv('ScanFile') # if fio and spec are also saved this is a list
+    if isinstance(ScanFile, list):
+        for i in ScanFile:
+            if i.endswith('.fio'):
+                ScanFile = i.replace('.fio', '')
+                break
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
@@ -598,13 +631,14 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
     :return:
     '''
-    envlist = HU.runMacro('lsenv')
-    ScanDir = [l for l in envlist if 'ScanDir' in l][0].split()[1]
-    ScanID = int([l for l in envlist if 'ScanID' in l][0].split()[1])
-    ScanFile = [l for l in envlist if 'ScanFile' in l][0].split()[1].rpartition('.')[0][2:]
-    #ScanDir = HU.getEnv('ScanDir')
-    #ScanID = HU.getEnv('ScanID')
-    #ScanFile = HU.getEnv('ScanFile')
+    ScanDir = HU.getEnv('ScanDir')
+    ScanID = HU.getEnv('ScanID')
+    ScanFile = HU.getEnv('ScanFile') # if fio and spec are also saved this is a list
+    if isinstance(ScanFile, list):
+        for i in ScanFile:
+            if i.endswith('.fio'):
+                ScanFile = i.replace('.fio', '')
+                break
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
