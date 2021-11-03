@@ -48,7 +48,7 @@ def lsenvironment():
 
 
 def _prepare_config_file(path):
-    with open(path+'/config.dat', 'w') as f:
+    with open(os.path.join(path, 'config.dat', 'w')) as f:
         f.write('# This is an automatically generated measurement configuration file for single grain diffraction measurements\n')
         f.write('# This file contains the name of the necessary devices. The device instance has to be filled.\n# The user may define new devices following the syntax:\n# dev_name: instance(with full path)\n')
         f.write('# Alternatively local spock names may also be used\n')
@@ -58,7 +58,18 @@ def _prepare_config_file(path):
         f.write('# vertical motor\n')
         f.write('mot_ver: \n')
         f.write('# omega rotation motor\n')
-        f.write('mot_rot: \n')
+        f.write('mot_rot: \n\n')
+        f.write('# near field detector:\n')
+        f.write('det_near: \n')
+        f.write('nearDetAbtgChannel: \n')
+        f.write('mot_nearDetY: \n')
+        f.write('nearDetYIn: \n')
+        f.write('nearDetYOut: \n\n')
+        f.write('# far field detector:')
+        f.write('det_far: \n')
+        f.write('farDetAbtgChannel: \n')
+        f.write('mot_farDetY: \n')
+
 
         
 
@@ -68,12 +79,14 @@ class Measurement:
     '''
     Class to define the measurement parameters:
         
-        moveable devices for y, z, and omega
+        movable devices for y, z, and omega
             -> this would be a nested dict with the names in this module as keys 
             and a subdir containing the device_name and the device instance itself
+        detectors
+            -> near and far field detectors
+
         it can not handle counters yet
         
-        detectors
         database
         directory
         log
@@ -86,16 +99,17 @@ class Measurement:
         self.create_directory()
         self.temp_setup_detector_folders()
         # make nested dict out of the device dict
-        for k in devices['moveables'].keys():
-            self.devs[k] = {'name': devices['moveables'][k], 'dev': self.import_device(devices['moveables'][k])}
+        for k in devices['movables'].keys():
+            self.devs[k] = {'name': devices['movables'][k], 'dev': self.import_device(devices['movables'][k])}
         
     
     def read_config_file(self, config_file):
         '''
         reads in the given configuration file
-        it returns a nested dictionary with 'moveables', 'counters'...
+        it returns a nested dictionary with 'movables', 'counters'...
         '''
-        devices = {'moveables': {}, 'counters': {}}
+        devices = {'movables': {}, 'counters': {}, 'detectors': {}}
+        aux = {}  # motor positions and detector channels
         try:
             with open(config_file, 'r') as f:
                 data = f.read()
@@ -107,10 +121,14 @@ class Measurement:
             else:
                 key = l.partition(':')[0]
                 value = l.partition(':')[2].strip()
-                if key.partition('_')[0] == 'mot': # moveable device 
-                    devices['moveables'][key] = value
-                if key.partition('_')[0] == 'cou': # counter device
+                if key.partition('_')[0] == 'mot': # movable device
+                    devices['movables'][key] = value
+                elif key.partition('_')[0] == 'cou': # counter device
                     devices['counters'][key] = value
+                elif key.partition('_')[0] == 'det': # counter device
+                    devices['detectors'][key] = value
+                else:
+                    aux[key] = value
         print('Config file read successfully')
         return devices
 
@@ -138,21 +156,22 @@ class Measurement:
     
     def create_directory(self):
         if self.measurement_path is not None:
-            if self.measurement_path[-1] == '/': self.measurement_path = self.measurement_path[:-1]
-            if self.measurement_path[0] != '/':
-                self.measurement_path = '/gpfs/current/raw' + os.sep + self.measurement_path
+            if not os.path.isabs(self.measurement_path):
+                self.measurement_path = os.path.join('/gpfs/current/raw', self.measurement_path)
             if os.path.exists(self.measurement_path):
                 raise ValueError(SE+'Directory exists'+EE)
-        else: raise ValueError(SE+'Directory not given'+EE)
+        else:
+            raise ValueError(SE+'Directory not given'+EE)
         try:
-            os.mkdir(self.measurement_path)
+            os.makedirs(self.measurement_path)
             print(SI+'Measurement dir: %s'%(self.measurement_path)+EE)
         except:
             raise ValueError(SE+'Cannot create directory'+EE)
-        self.varexdir = self.measurement_path+os.sep+'PE'
-        os.mkdir(self.varexdir)
-        self.lambdadir = self.measurement_path+os.sep+'lambda'
-        os.mkdir(self.lambdadir)
+        self.neardir = os.path.join(self.measurement_path, 'near')
+        os.makedirs(self.neardir)
+
+        self.fardir = os.path.join(self.measurement_path, 'far')
+        os.makedirs(self.fardir)
 
     
     def temp_setup_detector_folders(self):

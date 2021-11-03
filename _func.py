@@ -14,6 +14,7 @@ from matplotlib.patches import Rectangle
 from PIL import Image
 import dateutil
 import os, time
+import json
 
 try:
     import PyTango as PT
@@ -600,12 +601,121 @@ def showMap(fiofile, roi=None, etascale=False, save=False):
             meta.write('Radial pixels on the Lambda and rough eta in mdeg calculated with %.2f mm distance from the direct beam\n')
             for i in range(azimutalMap.shape[1]):
                 meta.write('%i %.2f'%(i,1000*i*0.055/dist))
-            
-    
     
     fig.colorbar(plot)
     plt.show()
 
 
 
+def showMinMap(fiofile1, fiofile2, roi=None, etascale=False, save=False):
+    '''
+    takes the minimum value of two nexus files and creates a map with the minium, to avoid random hot pixels
+    '''
 
+    d, savedir = _fioparser(fiofile1)
+    omega = np.array(d['idrz1(encoder)'])
+    omega += (omega[1]-omega[0])/2. # shifting the omega, because the only the starting angles are saved
+
+    image1 = imagesFromFio(fiofile1, channel=3)
+    if not isinstance(image1, str):
+        raise ValueError('fio file contains several images... Supposed to be a single nxs file')
+    if not image1.endswith('.nxs'):
+        raise ValueError('fio file does not point to an nxs file')
+        
+    image2 = imagesFromFio(fiofile2, channel=3)
+    if not isinstance(image2, str):
+        raise ValueError('fio file contains several images... Supposed to be a single nxs file')
+    if not image2.endswith('.nxs'):
+        raise ValueError('fio file does not point to an nxs file')
+    
+    assert getDataNXSLambda(image1).shape == getDataNXSLambda(image2).shape
+    
+    imageArray = np.minimum(getDataNXSLambda(image1), getDataNXSLambda(image2))
+
+    if roi is None:
+        roi, roiNP = explorer(fiofile1, ROI=False)
+
+    print("Using roi: %s"%roi)
+
+    azimutalMap = getProj(imageArray, roi, projAxis=0)
+
+    fig = plt.figure()
+    ax = fig.add_subplot(111)
+    ax.set_ylabel('omega angle [deg]')
+    
+    if etascale:
+        dist = 1100 # Lambda dist from direct beam [mm]
+        ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
+                         extent=[0, 1000*azimutalMap.shape[1]*0.055/dist, omega[0], omega[-1]], aspect='auto')
+    else:
+        ax.set_xlabel('eta [unscaled, pix]')
+        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=200, interpolation='none',
+                         extent=[0, azimutalMap.shape[1], omega[0], omega[-1]], aspect='auto')
+        
+    fig.colorbar(plot)
+    plt.show()
+
+
+
+def compareNXS(file1, file2):
+    diff = getDataNXSLambda(file1) - getDataNXSLambda(file2)
+    
+    
+    # generate figure
+    fig = plt.figure()
+    ax = plt.subplot(111)
+    fig.subplots_adjust(left=0.25, bottom=0.25)
+
+
+    im = np.array(diff[0])
+    ax.set_title(0)
+    
+    # display image
+    plot = ax.imshow(im, cmap='jet')
+    # define sliders
+    axmin = fig.add_axes([0.25, 0.1, 0.65, 0.03], facecolor='azure')
+    axmax  = fig.add_axes([0.25, 0.15, 0.65, 0.03], facecolor='azure')
+    smin = Slider(axmin, 'color min', 0, im.max(), valinit=0, valfmt='%i')
+    smax = Slider(axmax, 'color max', 0, im.max(), valinit=im.max()/5, valfmt='%i')
+    def updateColor(val):
+        plot.set_clim([smin.val, smax.val])
+        fig.canvas.draw()
+    smin.on_changed(updateColor)
+    smax.on_changed(updateColor)
+    
+    noImages = diff.shape[0]
+    
+    ax2 = fig.add_axes([0.25, 0.05, 0.65, 0.03], facecolor='lightgoldenrodyellow')
+    imSlider = Slider(ax2, 'image', 0, noImages - 1, valinit=0, valfmt='%i')
+    def updateImage(val):
+        indx = int(np.round(val))
+        im = diff[indx]
+        ax.set_title(indx)  
+        #print('Update image to %s' % (imageList[indx]))
+        
+        plot.set_data(im)
+        fig.canvas.draw()
+
+    imSlider.on_changed(updateImage)
+    
+    plt.show(block=True) 
+
+        
+def updateJSON(content, jsonF=None):
+    jsonFile = open(jsonF, 'r')
+    data = json.load(jsonFile)
+    jsonFile.close()
+
+    # modify the data
+    for k,v in data.items():
+        for kk,vv in v.items():
+            data[k][kk].append(vv[-1]+1)
+
+    jsonFile = open(jsonF, 'w+')
+    jsonFile.write(json.dumps(data))
+    jsonFile.close()
+####
+d = {'Grain1': {'hpos': {'pos': [], 'scan': [], 'roi': [], 'time': []},
+                'vpos': {'pos': [], 'scan': [], 'roi': [], 'time': []},
+                'opos': {'pos': [], 'scan': [], 'roi': [], 'time': []}}}
