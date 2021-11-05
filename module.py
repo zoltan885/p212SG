@@ -34,6 +34,10 @@ from PIL import Image
 import _func
 from matplotlib.backends.backend_pdf import PdfPages
 
+from collections import OrderedDict
+import json
+import shutil
+
 
 SE = '\033[41m'
 SI = '\033[44m'
@@ -60,15 +64,23 @@ def _prepare_config_file(path):
         f.write('# Alternatively local spock names may also be used\n')
         f.write('# Comment lines begin with hashtag and empty lines are discarded.\n\n')
         f.write('# horizontal motor\n')
-        f.write('mot_hor: \n')
+        f.write('mot_hor: idty2\n')
         f.write('# vertical motor\n')
-        f.write('mot_ver: \n')
+        f.write('mot_ver: idtz2\n')
         f.write('# omega rotation motor\n')
-        f.write('mot_rot: \n')
+        f.write('mot_rot: idrz1\n')
         f.write('# far field detector y motor\n')
-        f.write('ff_det_mot_hor: \n')
+        f.write('mot_ff_det_hor: \n')
         f.write('# far field detector z motor\n')
-        f.write('ff_det_mot_ver: \n')
+        f.write('mot_ff_det_ver: \n')
+        f.write('# top slit\n')
+        f.write('mot_st: eh3st\n')
+        f.write('# bottom slit\n')
+        f.write('mot_sb: eh3sb\n')
+        f.write('# inboard slit\n')
+        f.write('mot_st: eh3si\n')
+        f.write('# outboard slit\n')
+        f.write('mot_st: eh3so\n')
         f.write('# auxiliary devices (e.g. slits) for logging (spock names separated by spaces):\n')
         f.write('aux: ')
 
@@ -97,9 +109,12 @@ class Measurement:
         self.devs_mov = {}
         self.devs_aux = {}
         self.measurement_path = path
+        self.logJSON = path+'/log.json'
+        self.logger = logger(self.logJSON)
         self.create_directory()
         self.temp_setup_detector_folders()
         self.create_logfile()
+        
         # make nested dict out of the device dict
         for k in devices['movables'].keys():
             self.devs_mov[k] = {'name': devices['movables'][k], 'dev': self.import_device(devices['movables'][k])}
@@ -261,6 +276,60 @@ general class for grain Candidates
 the actual grain class could be an inheritance from the candidates class
 '''
 
+class logger(object):
+    '''
+    logger class for grain attributes
+    log the results into a json file
+    '''
+    def __init__(self, jfile):
+        self.j = jfile
+        self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
+        self.grainList = OrderedDict()
+        
+    def register(self, grain):
+        self.grainList[grain.name] = grain
+    
+    def _backup(self):
+        if os.path.exists(self.j):
+            shutil.copy2(self.j, self.j+'_bak')
+    
+    def logNow(self):
+        self._backup()
+        dumpDict = OrderedDict()
+        for g,inst in self.grainList.items():
+            dumpDict[g] = OrderedDict()
+            for a in self.attrs:
+                try:
+                    dumpDict[g][a] = eval('inst.%s' % a)
+                except:
+                    dumpDict[g][a] = ['?',]
+                    
+        with open(self.j, 'w') as jf:
+            json.dump(dumpDict, jf)
+        return dumpDict
+
+class TestGrain(object):
+    def __init__(self, name, logger):
+        self.name = name
+        logger.register(self)
+        self.timestamp = [time.asctime()]
+        self.direction = ['V',]
+        self.detector = ['eiger',]
+        self.slit = [(11,22,33,44),]
+        self.scanID = [153,]
+        self.roi = [(2341, 4232, 231, 2134), ]
+        self.intensity = [[1,2,3,4,5,6,7,6,5,4,23,2,1],]
+        self.fitpars = [{'s': 12, 'b': 423.2},]
+        self.positions = [{'y': 0.12, 'z': -1.2, 'o': 213.84},]
+        
+
+l = logger('/home/hegedues/Documents/snippets/crap.json')
+print(vars(l))
+g1 = TestGrain('grain1', l)
+g3 = TestGrain('grain66', l)
+print(vars(l))
+l.logNow()
+
 
 
 class Grain(object):
@@ -275,20 +344,28 @@ class Grain(object):
         self.name=name
         self.__class__.instances.append(self.name)
         self.M = M
+        self.M.logger.register(self.name)
         self._ypos = [self.M.devs_mov['mot_hor']['dev'].position]
         self._zpos = [self.M.devs_mov['mot_ver']['dev'].position]
         self._rotpos = [self.M.devs_mov['mot_rot']['dev'].position]
-        self._dethpos = [self.M.devs_mov['ff_det_mot_hor']['dev'].position]
-        self._detvpos = [self.M.devs_mov['ff_det_mot_ver']['dev'].position]
+        self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
+        self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
-        self._positions = {'mot_hor': self._ypos,
-                          'mot_ver': self._zpos,
-                          'mot_rot': self._rotpos,
-                          'ff_det_mot_hor': self._dethpos,
-                          'ff_det_mot_ver': self._detvpos}
+        # JSON logging attributes
+        self.positions = []
+        self._appendPos()
+        self.timestamp = [time.asctime()]
+        self.direction = ['?']
+        self.detector = ['?']
+        self.slit = []
+        self._appendSlitPos()
+        self.scanID = []
+        self.ROIs = [('?',)]
+        self.intensity = [['?'],]
+        self.fitpars = [{'?': '?'}]
 
-        self.roi = None
-        self.Lroi =None
+        self.roi  = None
+        self.Lroi = None
 
         # some magic to get the spock names of the moveable devices so that later they can be used by spock macros like mv
         self.moveable_spock_names = _func._getMovableSpockNames()
@@ -296,8 +373,8 @@ class Grain(object):
         self.mot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_hor']['dev'].dev_name()]
         self.mot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ver']['dev'].dev_name()]
         self.mot_rot = self.inv_moveable_spock_names[self.M.devs_mov['mot_rot']['dev'].dev_name()]
-        self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['ff_det_mot_hor']['dev'].dev_name()]
-        self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['ff_det_mot_ver']['dev'].dev_name()]
+        self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
+        self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
 
         self.M.write_log('"%s" grain object defined with positions:' % (self.name))
         self.M.log_positions(addtime=False)
@@ -305,13 +382,27 @@ class Grain(object):
         if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor, self.detmot_ver)
         self.spock = get_ipython()
 
+    def _appendPos(self):
+        dct = {'y': self._ypos,
+              'z': self._zpos,
+              'o': self._rotpos,
+              'det_y': self._dethpos,
+              'det_z': self._detvpos}
+        self.positions.append(dct)
+
+    def _appendSlitPos(self):
+        dct = {'top': self.M.devs.mov['mot_st']['dev'].position,
+               'bottom': self.M.devs.mov['mot_sb']['dev'].position,
+               'inboard': self.M.devs.mov['mot_si']['dev'].position,
+               'outboard': self.M.devs.mov['mot_so']['dev'].position}
+        self.slit.append(dct)
 
     def new_pos(self, ypos=None, zpos=None, Opos=None):
         self._ypos.append(self.M.devs_mov['mot_hor']['dev'].position)
         self._zpos.append(self.M.devs_mov['mot_ver']['dev'].position)
         self._rotpos.append(self.M.devs_mov['mot_rot']['dev'].position)
-        self._dethpos.append(self.M.devs_mov['ff_det_mot_hor']['dev'].position)
-        self._detvpos.append(self.M.devs_mov['ff_det_mot_ver']['dev'].position)
+        self._dethpos.append(self.M.devs_mov['mot_ff_det_hor']['dev'].position)
+        self._detvpos.append(self.M.devs_mov['mot_ff_det_ver']['dev'].position)
         self.M.write_log('New position defined for "%s"' % self.name)
         self.M.log_positions()
 
@@ -363,7 +454,8 @@ class Grain(object):
 
         if channel == 1:
             if not self.roi:
-                positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+                positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, 
+                                                             exposure=exposure, channel=channel, roi=self.roi)
             else:
                 positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
                                                    channel=channel, roi=self.roi)
