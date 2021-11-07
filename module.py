@@ -36,6 +36,7 @@ from matplotlib.backends.backend_pdf import PdfPages
 
 from collections import OrderedDict
 import json
+import yaml
 import shutil
 
 
@@ -114,6 +115,8 @@ class Measurement:
         self.create_directory()
         self.temp_setup_detector_folders()
         self.create_logfile()
+
+        self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Lambda'}
         
         # make nested dict out of the device dict
         for k in devices['movables'].keys():
@@ -281,44 +284,56 @@ class logger(object):
     logger class for grain attributes
     log the results into a json file
     '''
-    def __init__(self, jfile):
-        self.j = jfile
-        self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
-        self.grainList = OrderedDict()
-        
-    def register(self, grain):
-        self.grainList[grain.name] = grain
+    def __init__(self, fname):
+        self.j = fname+'.json'
+        self.y = fname+'.yml'
+        #self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
+        self.objList = OrderedDict()  # dict holding the registered classes
+
+    def register(self, obj):
+        self.objList[obj.name] = obj
     
     def _backup(self):
         if os.path.exists(self.j):
             shutil.copy2(self.j, self.j+'_bak')
-    
+        if os.path.exists(self.y):
+            shutil.copy2(self.y, self.y+'_bak')
+
     def logNow(self):
         self._backup()
         dumpDict = OrderedDict()
-        for g,inst in self.grainList.items():
+        for g,inst in self.objList.items():
             dumpDict[g] = OrderedDict()
-            for a in self.attrs:
-                try:
-                    dumpDict[g][a] = eval('inst.%s' % a)
-                except:
-                    dumpDict[g][a] = ['?',]
-                    
+            if hasattr(inst, 'logAttrs'):
+                for a in inst.logAttrs:
+                    try:
+                        dumpDict[g][a] = eval('inst.%s' % a)
+                    except:
+                        dumpDict[g][a] = ['?',]
+            else:  # nothing to log
+                if DEBUG:
+                    print(SI+'%s is registered for logging, but there is nothing to log' % inst.__repr__()+EE)
+
         with open(self.j, 'w') as jf:
             json.dump(dumpDict, jf)
+        with open(self.y, 'w') as yf:
+            yaml.dump(dumpDict, yf)
         return dumpDict
+
 
 class TestGrain(object):
     def __init__(self, name, logger):
         self.name = name
         logger.register(self)
+        self.logAttrs = ['timestamp', 'action', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
         self.timestamp = [time.asctime()]
+        self.action = ['centering']
         self.direction = ['V',]
         self.detector = ['eiger',]
-        self.slit = [(11,22,33,44),]
+        self.slit = [{'top': 11, 'bottom': 22, 'inboard': 33, 'outboard': 44},]
         self.scanID = [153,]
-        self.roi = [(2341, 4232, 231, 2134), ]
-        self.intensity = [[1,2,3,4,5,6,7,6,5,4,23,2,1],]
+        self.ROIs = [{'eiger': (2341, 4232, 231, 2134)}, ]
+        self.integRes = [([-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6],[1,2,3,4,5,6,7,6,5,4,23,2,1]),]
         self.fitpars = [{'s': 12, 'b': 423.2},]
         self.positions = [{'y': 0.12, 'z': -1.2, 'o': 213.84},]
         
@@ -355,17 +370,24 @@ class Grain(object):
         self.positions = []
         self._appendPos()
         self.timestamp = [time.asctime()]
+        self.action['initGrain']
         self.direction = ['?']
         self.detector = ['?']
         self.slit = []
         self._appendSlitPos()
         self.scanID = []
         self.ROIs = [('?',)]
-        self.intensity = [['?'],]
+        self.integRes = [['?'],]
         self.fitpars = [{'?': '?'}]
+        self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
 
-        self.roi  = None
-        self.Lroi = None
+        # self.roi  = None
+        # self.Lroi = None
+        # current rois:
+        self.cROIs = {}
+        for ch,d in self.M.detChannels.items():
+            self.cROIs[ch] = None
+
 
         # some magic to get the spock names of the moveable devices so that later they can be used by spock macros like mv
         self.moveable_spock_names = _func._getMovableSpockNames()
@@ -383,6 +405,9 @@ class Grain(object):
         self.spock = get_ipython()
 
     def _appendPos(self):
+        '''
+        Append the current motor positions to the self.positions list
+        '''
         dct = {'y': self._ypos,
               'z': self._zpos,
               'o': self._rotpos,
@@ -391,11 +416,31 @@ class Grain(object):
         self.positions.append(dct)
 
     def _appendSlitPos(self):
+        '''
+        Append the current slit positions to the self.slit list
+        '''
         dct = {'top': self.M.devs.mov['mot_st']['dev'].position,
                'bottom': self.M.devs.mov['mot_sb']['dev'].position,
                'inboard': self.M.devs.mov['mot_si']['dev'].position,
                'outboard': self.M.devs.mov['mot_so']['dev'].position}
         self.slit.append(dct)
+
+    def _appendROI(self):
+        '''
+        Append the curent ROIs for all detectors defined in the measurement 
+        '''
+        dct = {}
+        for ch,d in self.M.detChannels.items():
+            dct[d] = self.cROIs[d]
+        self.ROIs.append(dct)
+
+    def getScanID(self):
+        '''
+        Gets the scan ID of the !last! scan
+        '''
+        sid = int(HU.getEnv('ScanID')) - 1
+        return sid
+
 
     def new_pos(self, ypos=None, zpos=None, Opos=None):
         self._ypos.append(self.M.devs_mov['mot_hor']['dev'].position)
@@ -436,7 +481,7 @@ class Grain(object):
                           self.mot_rot, self.current_pos()[2]))
 
 
-    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False):
+    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, logger=None):
         if channel == 1:
             self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
         if channel == 3:
@@ -452,23 +497,25 @@ class Grain(object):
         self.M.Lambda.SaveAllImages = True
         time.sleep(0.1)
 
-        if channel == 1:
-            if not self.roi:
-                positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, 
-                                                             exposure=exposure, channel=channel, roi=self.roi)
-            else:
-                positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                   channel=channel, roi=self.roi)
-        if channel == 3:
-            if not self.Lroi:
-                positions, res, self.Lroi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                   channel=channel, roi=self.Lroi)
-            if self.Lroi:
-                positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                    channel=channel, roi=self.Lroi)
+        positions, res, self.cROIs[channel], fio = _func.center('h', start, end, NoSteps, rotstart, rotend,
+                                                                exposure=exposure, channel=channel, roi=self.cROIs[channel])
+        # if channel == 1:
+        #     if not self.roi:
+        #         positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, 
+        #                                                      exposure=exposure, channel=channel, roi=self.roi)
+        #     else:
+        #         positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                            channel=channel, roi=self.roi)
+        # if channel == 3:
+        #     if not self.Lroi:
+        #         positions, res, self.Lroi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                            channel=channel, roi=self.Lroi)
+        #     if self.Lroi:
+        #         positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                             channel=channel, roi=self.Lroi)
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.roi, addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
             self.spock.magic('umv idty2 %.3f' % res['cen'])
@@ -477,10 +524,23 @@ class Grain(object):
             self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('centerH')
+            self.direction.append('H')
+            self.detector.append(self.M.detChannels[channel])
+            self._appendSlitPos()
+            self.scanID.append(self.getScanID())
+            self._appendROI()
+            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
+            self.logger.logNow()
+
         #self.new_pos()
 
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False):
+    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, logger=None):
         if channel == 1:
             self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
         if channel == 3:
@@ -495,22 +555,24 @@ class Grain(object):
         elif channel == 1:
             self.M.varex.AllStopAcq()
         time.sleep(0.1)
-        if channel == 1:
-            if not self.roi:
-                positions, res, self.roi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
-            else:
-                positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                   channel=channel, roi=self.roi)
-        if channel == 3:
-            if not self.Lroi:
-                positions, res, self.Lroi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                   channel=channel, roi=self.Lroi)
-            else:
-                positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-                                                    channel=channel, roi=self.Lroi)
+        positions, res, self.cROIs[channel], fio = _func.center('v', start, end, NoSteps, rotstart, rotend,
+                                                                exposure=exposure, channel=channel, roi=self.cROIs[channel])
+        # if channel == 1:
+        #     if not self.roi:
+        #         positions, res, self.roi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
+        #     else:
+        #         positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                            channel=channel, roi=self.roi)
+        # if channel == 3:
+        #     if not self.Lroi:
+        #         positions, res, self.Lroi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                            channel=channel, roi=self.Lroi)
+        #     else:
+        #         positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
+        #                                             channel=channel, roi=self.Lroi)
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.roi, addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
             self.spock.magic('umv idtz2 %.3f' % res['cen'])
@@ -518,9 +580,23 @@ class Grain(object):
         if auto:
             self.spock.magic('umv %s %f'%(self.mot_ver, res['cen']))
             self.M.write_log('Automatically moved to the center.')
+
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('centerV')
+            self.direction.append('V')
+            self.detector.append(self.M.detChannels[channel])
+            self._appendSlitPos()
+            self.scanID.append(self.getScanID())
+            self._appendROI()
+            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
+            self.logger.logNow()
+
         #self.new_pos()
 
-    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1, auto=False, mode=24):
+    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1, auto=False, mode=24, logger=False):
         if channel == 1:
             self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
         if channel == 3:
@@ -540,19 +616,21 @@ class Grain(object):
             self.M.varex.AllStopAcq()
         time.sleep(0.1)
 
-        if channel == 1:
-            if not self.roi:
-                positions, res, self.roi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
-            else:
-                positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
-        if channel == 3:
-            if not self.Lroi:
-                positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
-            else:
-                positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
+        positions, res, self.cROIs[channel], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[channel])
+
+        # if channel == 1:
+        #     if not self.roi:
+        #         positions, res, self.roi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
+        #     else:
+        #         positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
+        # if channel == 3:
+        #     if not self.Lroi:
+        #         positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
+        #     else:
+        #         positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.roi, addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         print(res['moveto'])
         if res['moveto']:
@@ -561,20 +639,50 @@ class Grain(object):
         if auto:
             self.spock.magic('umv %s %f'%(self.mot_rot, res['cen']))
             self.M.write_log('Automatically moved to the center.')
+
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('centerO')
+            self.direction.append('O')
+            self.detector.append(self.M.detChannels[channel])
+            self._appendSlitPos()
+            self.scanID.append(self.getScanID())
+            self._appendROI()
+            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
+            self.logger.logNow()
+
         #self.new_pos()
 
 
-    def recordMap(self, start, end, NoSteps, exposure=None):
+    def recordMap(self, start, end, NoSteps, exposure=None, channel=3):
         if exposure is None:
             raise ValueError('Exposure time not given')
         self.M.set_slit_size(LARGEBEAM)
         self.M.Lambda.StopAcq()
         time.sleep(0.1)
         self.M.Lambda.SaveAllImages = True
-        if not self.Lroi:
-            positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=3, roi=self.Lroi)
-        else:
-            positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=3, roi=self.Lroi)
+
+        positions, res, self.cROIs[channel], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure,
+                                                                     channel=channel, roi=self.cROIs[channel])
+        # if not self.Lroi:
+        #     positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
+        # else:
+        #     positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
+
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('recordMap')
+            self.direction.append('?')
+            self.detector.append(self.M.detChannels[channel])
+            self._appendSlitPos()
+            self.scanID.append(self.getScanID())
+            self._appendROI()
+            self.integRes.append((['?'], ['?']))
+            self.fitpars.append({'cen': '?', 'fwhm': '?'})
+            self.logger.logNow()
 
 
 
@@ -584,24 +692,40 @@ class Grain(object):
         currently it can not, because the explorer does not report which detector it used
         '''
         if imsource is not None:
-            if channel == 1:
-                self.roi, _ = _func.explorer(imsource)
-                self.M.write_log('Varex ROI redefined: %s for grain %s' % (self.roi, self.name))
-            if channel == 3:
-                self.Lroi, _ = _func.explorer(imsource)
-                self.M.write_log('Lambda ROI redefined: %s for grain %s' % (self.Lroi, self.name))
+            self.cROIs[channel], _ = _func.explorer(imsource)
+            self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[channel], str(self.cROIs[channel]), self.name))
+            # if channel == 1:
+            #     self.roi, _ = _func.explorer(imsource)
+            #     self.M.write_log('Varex ROI redefined: %s for grain %s' % (self.roi, self.name))
+            # if channel == 3:
+            #     self.Lroi, _ = _func.explorer(imsource)
+            #     self.M.write_log('Lambda ROI redefined: %s for grain %s' % (self.Lroi, self.name))
         else:
-            if channel == 1:
-                self.roi = None
-                self.M.write_log('Varex ROI deleted')
-            if channel == 3:
-                self.Lroi = None
-                self.M.write_log('Lambda ROI deleted')
+            print(SE+'No image source defined!'+EE)
+            # if channel == 1:
+            #     self.roi = None
+            #     self.M.write_log('Varex ROI deleted')
+            # if channel == 3:
+            #     self.Lroi = None
+            #     self.M.write_log('Lambda ROI deleted')
+
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('redefROI')
+            self.direction.append('?')
+            self.detector.append(self.M.detChannels[channel])
+            self._appendSlitPos()
+            self.scanID.append('?')
+            self._appendROI()
+            self.integRes.append((['?'], ['?']))
+            self.fitpars.append({'cen': '?', 'fwhm': '?'})
+            self.logger.logNow()
 
 
 
-    def showMap(self, fiofile, maxint):
-        _func.showMap(fiofile, roi=self.Lroi, maxint=maxint)
+    def showMap(self, fiofile, maxint, channel=3):
+        _func.showMap(fiofile, roi=self.cROIs[channel], maxint=maxint)
 
 
 
