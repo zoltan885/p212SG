@@ -11,9 +11,10 @@ import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from matplotlib.patches import Rectangle
 
-from PIL import Image
+#from PIL import Image
 import dateutil
 import os, time
+import fabio
 
 try:
     import PyTango as PT
@@ -145,19 +146,18 @@ def _getPosOfImage(imagename):
     pass
 
 
-def explorer(imsource, ROI=False):
+def explorer(imsource, ROI=None):
     """
     function for initial grain hunt
     shows the list of images with a slider to inspect them individually
 
     TODO:
-        could work with keybord
-        if ROI is already given it should show a rectangle
+        could work with keyboard
     """
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
 
-    tif,nxs,fio = False,False,False
+    tif,nxs,fio,h5 = False,False,False,False
     if isinstance(imsource, list):
         imageList = imsource
         tif = True
@@ -177,9 +177,17 @@ def explorer(imsource, ROI=False):
                 if il.endswith('nxs'):
                     data = getDataNXSLambda(il)
                     nxs = True
+                elif il.endswith('.h5'):
+                    data = getEigerDataLength(il)
+                    h5 = True
             elif isinstance(il, list):
                 imageList = il
                 tif = True
+        elif imsource.endswith('.h5'):
+            data = getEigerDataset(imsource)
+            if DEBUG: print('Eiger file')
+            h5 = True
+
     else:
         raise ValueError('Source format not recognized.')
 
@@ -203,24 +211,26 @@ def explorer(imsource, ROI=False):
             for k in fiodata.keys():
                 if k not in ['idrz1(encoder)', 'type', 'filename', 'end pos', 'unix time', 'channel']:
                     positions = fiodata[k]
-
-
     # select first image
     if tif:
-        im = np.array(Image.open(imageList[0]))
+        im = np.array(fabio.open(imageList[0]).data)
         if positions is not None:
             ax.set_title(imageList[0].rpartition('/')[2] + ': %.4f'%positions[0])
         else:
             ax.set_title(imageList[0].rpartition('/')[2])
         ax.set_title(imageList[0].rpartition('/')[2])
-    if nxs:
+    if nxs or h5:
         im = np.array(data[0])
         if positions is not None:
             ax.set_title('0: %.4f'%positions[0])
         else:
             ax.set_title(0)
-
-
+    # if h5:
+    #     im = np.array(data[0])
+    #     if positions is not None:
+    #         ax.set_title('0: %.4f'%positions[0])
+    #     else:
+    #         ax.set_title(0)
 
     # display image
     plot = ax.imshow(im, cmap='jet')
@@ -229,6 +239,7 @@ def explorer(imsource, ROI=False):
     axmax  = fig.add_axes([0.25, 0.15, 0.65, 0.03], facecolor='azure')
     smin = Slider(axmin, 'color min', 0, im.max(), valinit=0, valfmt='%i')
     smax = Slider(axmax, 'color max', 0, im.max(), valinit=im.max()/5, valfmt='%i')
+
     def updateColor(val):
         plot.set_clim([smin.val, smax.val])
         fig.canvas.draw()
@@ -236,19 +247,20 @@ def explorer(imsource, ROI=False):
     smax.on_changed(updateColor)
 
     if tif: noImages = len(imageList)
-    if nxs: noImages = data.shape[0]
+    if nxs or h5: noImages = data.shape[0]
 
     ax2 = fig.add_axes([0.25, 0.05, 0.65, 0.03], facecolor='lightgoldenrodyellow')
     imSlider = Slider(ax2, 'image', 0, noImages - 1, valinit=0, valfmt='%i')
+
     def updateImage(val):
         indx = int(np.round(val))
         if tif:
-            im = np.array(Image.open(imageList[indx]))
+            im = fabio.open(imageList[indx]).data
             if positions is not None:
                 ax.set_title(imageList[indx].rpartition('/')[2] + ': %.4f'%positions[indx])
             else:
                 ax.set_title(imageList[indx].rpartition('/')[2])
-        if nxs:
+        if nxs or h5:
             im = data[indx]
             ax.set_title(indx)
         #print('Update image to %s' % (imageList[indx]))
@@ -266,8 +278,8 @@ def explorer(imsource, ROI=False):
         sumi = np.zeros_like(im)
         if tif:
             for i in imageList:
-                sumi = np.maximum(sumi, np.array(Image.open(i)))
-        if nxs:
+                sumi = np.maximum(sumi, fabio.open(i).data)
+        if nxs or h5:
             for i in range(noImages):
                 sumi = np.maximum(sumi, data[i])
         ax.set_title('Z project max')
@@ -281,12 +293,13 @@ def explorer(imsource, ROI=False):
         avei = np.zeros_like(im)
         if tif:
             for i in imageList:
-                avei = np.sum((avei, np.array(Image.open(i))), axis=0)
-        if nxs:
-            for i in noImages:
-                avei = np.sum(avei, data[i], axis=0)
+                avei = np.sum((avei, fabio.open(i).data), axis=0)
+            avei = avei / len(imageList)
+        if nxs or h5:
+            for i in range(noImages):
+                avei = np.sum((avei, data[i]), axis=0)
+            avei = avei / data.shape[0]
 
-        avei = avei / len(imageList)
         ax.set_title('Z average')
         plot.set_data(avei)
 
@@ -296,6 +309,7 @@ def explorer(imsource, ROI=False):
 
     # ROI definition
     limits={'xmin':0, 'xmax':10000, 'ymin':0, 'ymax':10000}
+
     def on_xlims_change(axes):
         limits['xmin'] = int(np.floor(ax.get_xlim()[0]))
         limits['xmax'] = int(np.ceil(ax.get_xlim()[1]))
@@ -308,11 +322,18 @@ def explorer(imsource, ROI=False):
     ax.callbacks.connect('xlim_changed', on_xlims_change)
     ax.callbacks.connect('ylim_changed', on_ylims_change)
 
+    if ROI is not None:
+        xpos = ROI['xmin']
+        ypos = ROI['ymin']
+        width = ROI['xmax']-ROI['xmin']
+        height = ROI['ymax']-ROI['ymin']
+        rect = Rectangle((xpos, ypos), width, height, linewidth=1, edgecolor='r', facecolor='none')
+        ax.add_patch(rect)
+
     plt.show(block=True)
     # catch ROI
     limitsNP = {'xmin':limits['ymin'], 'xmax':limits['ymax'], 'ymin':limits['xmin'], 'ymax':limits['xmax']}
     return limits, limitsNP
-
 
 def _readFastsweepLog(filename):
     # dtype=None is needed for automatic detemination of the data type in each column
@@ -328,7 +349,6 @@ def _readFastsweepLog(filename):
     avepos = (log['encoder_end_position']+log['encoder_start_position'])/2
     # determining the average motor position for every image (111111 is the encoder conversion factor)
     avemotpos = avepos/111111
-
 
 def getEigerDataLength(datafile):
     import h5py
@@ -361,11 +381,12 @@ def getEigerDataset(datafile, ind=None):
         indinset = ind-ctr
         data = a['entry']['data'][str(lst[dset])][indinset,:,:].astype('int16')
     else:
+        print('here')
         lst = list(a['entry']['data'].keys())
+        print(lst)
         for ds in lst:
-            data.append(a['entry']['data'][ds].astype('int16'))
-    return np.array(data)
-
+            data.append(np.array(a['entry']['data'][ds]).astype('int16'))
+    return np.squeeze(data)  # otherwise there is an extra dimension (God knows why)
 
 def getDataNXSLambda(filename, seq=None):
     '''
@@ -386,14 +407,12 @@ def getDataNXSLambda(filename, seq=None):
         data = filtered_data
     return data
 
-
-def getDataTIF(listOfImages):
+def getDataTIFCBF(listOfImages):
     data = []
     for i in listOfImages:
-        data.append(np.array(Image.open(i)))
+        data.append(fabio.open(i))
     print(np.array(data).shape)
     return np.array(data)
-
 
 def subtractDark(img, dark, negval=0):
     '''
@@ -406,7 +425,6 @@ def subtractDark(img, dark, negval=0):
     img[img < negval] = negval
     return img
 
-
 def integrateROI(data, ROI, dark=None, show=False):
     '''
     returns the sum of the ROI of an image, if dark is given it is first subtracted
@@ -417,7 +435,6 @@ def integrateROI(data, ROI, dark=None, show=False):
         img = subtractDark(img, dark)
     # the index variables are swapped, because PIL and np.array does not define them the same way
     #img = img.transpose()
-
     # the numpy convention is different than the PIL therefore the image is transposed
     xmin = ROI['ymin']
     xmax = ROI['ymax']
@@ -430,8 +447,6 @@ def integrateROI(data, ROI, dark=None, show=False):
         ax.imshow(im, vmin=0, vmax=im.max()/5, cmap='jet')
         plt.show()
     return np.mean(img[xmin:xmax, ymin:ymax])
-
-
 
 def getIntensities(imsource, roi):
     tif,nxs = False,False
@@ -457,21 +472,17 @@ def getIntensities(imsource, roi):
                 tif = True
     else:
         raise ValueError('Source format not recognized.')
-
     print(':getIntensities: tif/nxs' , tif, nxs)
-
     intensities = []
     if tif:
         for i in imageList:
-            im = np.array(Image.open(i))
+            im = fabio.open(i).data
             intensities.append(integrateROI(im, roi))
     elif nxs:
         for i in range(data.shape[0]):
             im = data[i]
             intensities.append(integrateROI(im, roi))
-
     return np.array(intensities)
-
 
 
 def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
@@ -520,7 +531,6 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
         pars['line_slope'].set((y[-1]-y[0])/(x[-1]-x[0]))
         pars['line_intercept'].set(np.min(y))
 
-
     mod = lmod + gmod
 
     #print(x, y)
@@ -565,18 +575,14 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
             movetoButton = Button(axmoveto, 'Moveto')
             movetoButton.on_clicked(moveto)
             plt.show(block=True)
-
         #if show:
         #    result.plot_fit(numpoints=200)
         #    plt.axvline(x=cen)
         #    plt.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
         #    plt.show()
-
         return {'cen': cen, 'fwhm': fwhm, 'moveto': move}
     else:
         raise ValueError('Fit did not work')
-
-
 
 
 def center(direction, start, end, NoSteps, rotstart, rotend,
@@ -636,23 +642,16 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     supersweepCommand = 'supersweep %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
     print(supersweepCommand)
 
-
-
     supersweepOut = HU.runMacro(supersweepCommand)
     time.sleep(0.1)
     fiodata, path = _fioparser(scanFileName)
     path = path['%d' % channel]
-
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
-
-
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
-
     res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
-
     return positions, res, roi, scanFileName
 
 
@@ -681,8 +680,6 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     print(scanFileName)
     sweepCommand = 'fastsweep idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
     print(sweepCommand)
-
-
     sweepOut = HU.runMacro(sweepCommand)
     time.sleep(0.1)
     fiodata, path = _fioparser(scanFileName)
@@ -691,12 +688,9 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
-
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
-
     res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
-
     return positions, res, roi, scanFileName
 
 
@@ -721,18 +715,18 @@ def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
     '''
     creates a map from an already existing measurement
     '''
-
     d, savedir = _fioparser(fiofile)
     omega = np.array(d['idrz1(encoder)'])
-    omega += (omega[1]-omega[0])/2. # shifting the omega, because the only the starting angles are saved
+    omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
 
     image = imagesFromFio(fiofile, channel=3)
     if not isinstance(image, str):
-        raise ValueError('fio file contains several images... Supposed to be a single nxs file')
-    if not image.endswith('.nxs'):
-        raise ValueError('fio file does not point to an nxs file')
-    imageArray = getDataNXSLambda(image)
-
+        raise ValueError('fio file contains several images... Supposed to be a single nxs/h5 file')
+    if image.endswith('.nxs'):
+        imageArray = getDataNXSLambda(image)
+    if image.endswith('.h5'):
+        imageArray = getEigerDataset(image)
+        raise ValueError('fio file does not point to an nxs or h5 file')
     if roi is None:
         roi, roiNP = explorer(fiofile, ROI=False)
 
@@ -768,8 +762,6 @@ def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
             meta.write('Radial pixels on the Lambda and rough eta in mdeg calculated with %.2f mm distance from the direct beam\n')
             for i in range(azimutalMap.shape[1]):
                 meta.write('%i %.2f'%(i,1000*i*0.055/dist))
-
-
 
     fig.colorbar(plot)
     plt.show()
