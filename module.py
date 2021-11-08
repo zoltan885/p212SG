@@ -27,8 +27,6 @@ from matplotlib.widgets import Slider
 from matplotlib.patches import Rectangle
 import time
 
-import weakref # to keep track of the grain or candidate objects
-
 from PIL import Image
 
 import _func
@@ -104,15 +102,18 @@ class Measurement:
         directory
         log
     '''
-    def __init__(self, config_file, path=None):
+    def __init__(self, config_file, path, load=False):
         devices = self.read_config_file(config_file)
         if DEBUG: print(devices)
         self.devs_mov = {}
         self.devs_aux = {}
         self.measurement_path = path
-        self.logJSON = path+'/log.json'
-        self.logger = logger(self.logJSON)
-        self.create_directory()
+        self.logF = path+'/log'
+        self.logger = logger(self.logF)
+        if load:
+            self.load_directory()
+        else:
+            self.create_directory()
         self.temp_setup_detector_folders()
         self.create_logfile()
 
@@ -155,7 +156,7 @@ class Measurement:
                         devices['auxiliary'][v] = v
 
 
-        print('Config file read successfully')
+        print('Config file successfully loaded')
         return devices
 
 
@@ -183,18 +184,22 @@ class Measurement:
 
 
     def create_directory(self):
-        if self.measurement_path is not None:
-            if self.measurement_path[-1] == '/': self.measurement_path = self.measurement_path[:-1]
-            if self.measurement_path[0] != '/':
-                self.measurement_path = '/gpfs/current/raw' + os.sep + self.measurement_path
-            if os.path.exists(self.measurement_path):
-                raise ValueError(SE+'Directory exists'+EE)
-        else: raise ValueError(SE+'Directory not given'+EE)
+        if not os.path.isabs(self.measurement_path):
+            self.measurement_path = os.path.join('/gpfs/current/raw', self.measurement_path)
+#        if self.measurement_path is not None:
+#            if self.measurement_path[-1] == '/': self.measurement_path = self.measurement_path[:-1]
+#            if self.measurement_path[0] != '/':
+#                self.measurement_path = '/gpfs/current/raw' + os.sep + self.measurement_path
+        if os.path.exists(self.measurement_path):
+            print(SE+'Directory exists! Please use load=True option when initializing the measurement.'+EE)
+            print('Object not instantiated')
+            raise ValueError
         try:
-            os.mkdir(self.measurement_path)
+            os.makedirs(self.measurement_path)
             print(SI+'Measurement dir: %s'%(self.measurement_path)+EE)
         except:
-            raise ValueError(SE+'Cannot create directory'+EE)
+            print(SE+'Cannot create directory'+EE)
+            raise
         self.varexdir = self.measurement_path+os.sep+'PE'
         os.mkdir(self.varexdir)
         # TEMPORARY: put paths to folders in the environment
@@ -208,6 +213,18 @@ class Measurement:
         HU.setEnv('LPA_folder', self.measurement_path.replace('/gpfs/', 't:/')+os.sep+'LPA')
         HU.setEnv('DIC_folder', self.measurement_path+os.sep+'DIC')
 
+    def load_directory(self):
+        if not os.path.isabs(self.measurement_path):
+            self.measurement_path = os.path.join('/gpfs/current/raw', self.measurement_path)
+        if not os.path.exists(self.measurement_path):
+            print(SE+'Directory does not exist'+EE)
+            raise Exception
+        
+        with open(self.logFile+'.json', 'r') as l:
+            grains = json.safe_load(l)
+        for g in grains.keys():
+            globals()[g] = Grain(g, self.logger)
+        
 
     def temp_setup_detector_folders(self):
         self.varex = PT.DeviceProxy('hasep21eh3:10000/p21/MultiXRDTango/hasep21perk02')
@@ -247,14 +264,14 @@ class Measurement:
             log.write('\n')
 
 
-    def _cleanup(self, really=False):
-        import shutil
-        if really:
-            try:
-                shutil.rmtree(self.measurement_path)
-            except OSError as e:
-                print("Error: %s : %s" % (self.measurement_path, e.strerror))
-            if DEBUG: print('Measurement directory deleted')
+#    def _cleanup(self, really=False):
+#        import shutil
+#        if really:
+#            try:
+#                shutil.rmtree(self.measurement_path)
+#            except OSError as e:
+#                print("Error: %s : %s" % (self.measurement_path, e.strerror))
+#            if DEBUG: print('Measurement directory deleted')
 
 
     def comment(self, comm):
@@ -274,6 +291,8 @@ class Measurement:
 
 
 
+
+
 '''
 general class for grain Candidates
 the actual grain class could be an inheritance from the candidates class
@@ -288,7 +307,7 @@ class logger(object):
         self.j = fname+'.json'
         self.y = fname+'.yml'
         #self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
-        self.objList = OrderedDict()  # dict holding the registered classes
+        self.objList = {}  # dict holding the registered classes
 
     def register(self, obj):
         self.objList[obj.name] = obj
@@ -301,9 +320,9 @@ class logger(object):
 
     def logNow(self):
         self._backup()
-        dumpDict = OrderedDict()
+        dumpDict = {}
         for g,inst in self.objList.items():
-            dumpDict[g] = OrderedDict()
+            dumpDict[g] = {}
             if hasattr(inst, 'logAttrs'):
                 for a in inst.logAttrs:
                     try:
@@ -338,10 +357,10 @@ class TestGrain(object):
         self.positions = [{'y': 0.12, 'z': -1.2, 'o': 213.84},]
         
 
-l = logger('/home/hegedues/Documents/snippets/crap.json')
+l = logger('/home/hegedues/Documents/snippets/crap')
 print(vars(l))
 g1 = TestGrain('grain1', l)
-g3 = TestGrain('grain66', l)
+g3 = TestGrain('grain22', l)
 print(vars(l))
 l.logNow()
 
@@ -353,11 +372,8 @@ class Grain(object):
     M - is the instance of the measurement class, defining the devices needed
     '''
 
-    instances = []
-
-    def __init__(self, M, name=None):
+    def __init__(self, M, name=None, grdct=None):
         self.name=name
-        self.__class__.instances.append(self.name)
         self.M = M
         self.M.logger.register(self.name)
         self._ypos = [self.M.devs_mov['mot_hor']['dev'].position]
@@ -366,20 +382,23 @@ class Grain(object):
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
         self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
-        # JSON logging attributes
-        self.positions = []
-        self._appendPos()
-        self.timestamp = [time.asctime()]
-        self.action['initGrain']
-        self.direction = ['?']
-        self.detector = ['?']
-        self.slit = []
-        self._appendSlitPos()
-        self.scanID = []
-        self.ROIs = [('?',)]
-        self.integRes = [['?'],]
-        self.fitpars = [{'?': '?'}]
-        self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
+        if grdct is not None:
+            self._loadGrainFromFile(grdct)
+        else:
+            # setup logging attributes
+            self.positions = []
+            self._appendPos()
+            self.timestamp = [time.asctime()]
+            self.action['initGrain']
+            self.direction = ['?']
+            self.detector = ['?']
+            self.slit = []
+            self._appendSlitPos()
+            self.scanID = []
+            self.ROIs = [('?',)]
+            self.integRes = [['?'],]
+            self.fitpars = [{'?': '?'}]
+            self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
 
         # self.roi  = None
         # self.Lroi = None
@@ -440,6 +459,25 @@ class Grain(object):
         '''
         sid = int(HU.getEnv('ScanID')) - 1
         return sid
+
+    def _loadGrainFromFile(self, grdct):
+        self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
+        for attr in self.logAttrs:
+            if attr not in grdct.keys():
+                raise Exception('%s could not be found in the yaml/json file' % attr)
+        for k,v in grdct.items():
+            exec("self.%s = grdct['%s']" % (k, k))
+#        self.positions = grdct['positions']
+#        self.timestamp = grdct['timestamp']
+#        self.action = grdct['action']
+#        self.direction = grdct['direction']
+#        self.detector = grdct['detector']
+#        self.slit = grdct['slit']
+#        self.scanID = grdct['scanID']
+#        self.ROIs = grdct['ROIs']
+#        self.integRes = grdct['integRes']
+#        self.fitpars = grdct['fitpars']
+#        self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
 
 
     def new_pos(self, ypos=None, zpos=None, Opos=None):

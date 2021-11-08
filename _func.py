@@ -330,6 +330,43 @@ def _readFastsweepLog(filename):
     avemotpos = avepos/111111
 
 
+def getEigerDataLength(datafile):
+    import h5py
+    a = h5py.File(datafile, 'r')
+    datalen = 0
+    for aa in a['entry']['data']:
+        datalen += a['entry']['data'][aa].shape[0]
+    return datalen
+
+def getEigerDataset(datafile, ind=None):
+    '''
+    get the eiger dataset
+    if index is given it returns a 2d array (the indexth image)
+    if omitted it returns the full dataset
+    '''
+    import h5py
+    a = h5py.File(datafile, 'r')
+    data = []
+    if ind is not None:
+        ctr, tctr = 0, 0
+        dset = 0
+        lst = list(a['entry']['data'].keys())
+        for i,l in enumerate(lst):
+            tctr += a['entry']['data'][l].shape[0]
+            if tctr > ind:
+                dset = i
+                break
+            else:
+                ctr = tctr
+        indinset = ind-ctr
+        data = a['entry']['data'][str(lst[dset])][indinset,:,:].astype('int16')
+    else:
+        lst = list(a['entry']['data'].keys())
+        for ds in lst:
+            data.append(a['entry']['data'][ds].astype('int16'))
+    return np.array(data)
+
+
 def getDataNXSLambda(filename, seq=None):
     '''
     seq is the sequence of the exposure types to dispose 'garbage' frames
