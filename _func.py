@@ -120,7 +120,7 @@ def imagesFromFio(fiofile, channel=1):
     data, savedir = _fioparser(fiofile)
     # lambda or only one tif image
     if len(set(data['filename'])) == 1:
-        channel=3
+        channel=2   # TODO
         files = savedir[str(channel)] + '/' + data['filename'][0]
     else:
         files = []
@@ -178,7 +178,7 @@ def explorer(imsource, ROI=None):
                     data = getDataNXSLambda(il)
                     nxs = True
                 elif il.endswith('.h5'):
-                    data = getEigerDataLength(il)
+                    data = getEigerDataset(il)
                     h5 = True
             elif isinstance(il, list):
                 imageList = il
@@ -449,7 +449,32 @@ def integrateROI(data, ROI, dark=None, show=False):
     return np.mean(img[xmin:xmax, ymin:ymax])
 
 def getIntensities(imsource, roi):
-    tif,nxs = False,False
+#    tif,nxs = False,False
+#    if isinstance(imsource, list):
+#        imageList = imsource
+#        tif = True
+#        if DEBUG: print('List of tif files')
+#    elif isinstance(imsource, str):
+#        if imsource.endswith('nxs'):
+#            data = getDataNXSLambda(imsource)
+#            nxs = True
+#            if DEBUG: print('Nexus file')
+#
+#        elif imsource.endswith('.fio'):
+#            il = imagesFromFio(imsource)
+#            print(il)
+#            if isinstance(il, str):
+#                if il.endswith('nxs'):
+#                    data = getDataNXSLambda(il)
+#                    nxs = True
+#            elif isinstance(il, list):
+#                imageList = il
+#                tif = True
+#    else:
+#        raise ValueError('Source format not recognized.')
+#    print(':getIntensities: tif/nxs' , tif, nxs)
+
+    tif,nxs,fio,h5 = False,False,False,False
     if isinstance(imsource, list):
         imageList = imsource
         tif = True
@@ -461,24 +486,34 @@ def getIntensities(imsource, roi):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
+            fiodata, savedir = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fio = True
             il = imagesFromFio(imsource)
             print(il)
             if isinstance(il, str):
                 if il.endswith('nxs'):
                     data = getDataNXSLambda(il)
                     nxs = True
+                elif il.endswith('.h5'):
+                    data = getEigerDataset(il)
+                    h5 = True
             elif isinstance(il, list):
                 imageList = il
                 tif = True
+        elif imsource.endswith('.h5'):
+            data = getEigerDataset(imsource)
+            if DEBUG: print('Eiger file')
+            h5 = True
     else:
         raise ValueError('Source format not recognized.')
+
     print(':getIntensities: tif/nxs' , tif, nxs)
     intensities = []
     if tif:
         for i in imageList:
             im = fabio.open(i).data
             intensities.append(integrateROI(im, roi))
-    elif nxs:
+    elif nxs or h5:
         for i in range(data.shape[0]):
             im = data[i]
             intensities.append(integrateROI(im, roi))
@@ -586,7 +621,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
 
 
 def center(direction, start, end, NoSteps, rotstart, rotend,
-           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False):
+           exposure=2, channel=1, horizontalCenteringMotor='idty1', verticalCenteringMotor='idtz2', roi=None, auto=False):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2

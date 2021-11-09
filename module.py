@@ -50,6 +50,7 @@ VERTICALBEAM   = {'eh3st': 0.1, 'eh3sb': 0.1, 'eh3so': 0.01, 'eh3si': 0.01}
 LARGEBEAM      = {'eh3st': 0.1, 'eh3sb': 0.1, 'eh3so': 0.1, 'eh3si': 0.1}
 
 
+
 def lsenvironment():
     ip = get_ipython() # this only works from Ipython, where get_ipython is in the global namespace
     ip.magic('lsenv')
@@ -63,7 +64,7 @@ def _prepare_config_file(path):
         f.write('# Alternatively local spock names may also be used\n')
         f.write('# Comment lines begin with hashtag and empty lines are discarded.\n\n')
         f.write('# horizontal motor\n')
-        f.write('mot_hor: idty2\n')
+        f.write('mot_hor: idty1\n')
         f.write('# vertical motor\n')
         f.write('mot_ver: idtz2\n')
         f.write('# omega rotation motor\n')
@@ -77,9 +78,9 @@ def _prepare_config_file(path):
         f.write('# bottom slit\n')
         f.write('mot_sb: eh3sb\n')
         f.write('# inboard slit\n')
-        f.write('mot_st: eh3si\n')
+        f.write('mot_si: eh3si\n')
         f.write('# outboard slit\n')
-        f.write('mot_st: eh3so\n')
+        f.write('mot_so: eh3so\n')
         f.write('# auxiliary devices (e.g. slits) for logging (spock names separated by spaces):\n')
         f.write('aux: ')
 
@@ -104,7 +105,8 @@ class Measurement:
     '''
     def __init__(self, config_file, path, load=False):
         devices = self.read_config_file(config_file)
-        if DEBUG: print(devices)
+        if DEBUG:
+            print(devices)
         self.devs_mov = {}
         self.devs_aux = {}
         self.measurement_path = path
@@ -114,17 +116,18 @@ class Measurement:
             self.load_directory()
         else:
             self.create_directory()
-        self.temp_setup_detector_folders()
+        #self.temp_setup_detector_folders()
         self.create_logfile()
 
         self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Lambda'}
-        
+
         # make nested dict out of the device dict
         for k in devices['movables'].keys():
             self.devs_mov[k] = {'name': devices['movables'][k], 'dev': self.import_device(devices['movables'][k])}
         for k in devices['auxiliary'].keys():
             self.devs_aux[k] = {'name': devices['auxiliary'][k], 'dev': self.import_device(devices['auxiliary'][k])}
         self.spock = get_ipython()
+        print('Init finished')
 
 
 
@@ -200,18 +203,20 @@ class Measurement:
         except:
             print(SE+'Cannot create directory'+EE)
             raise
-        self.varexdir = self.measurement_path+os.sep+'PE'
-        os.mkdir(self.varexdir)
+        self.varexdir = os.path.join(self.measurement_path, 'Varex')
+        os.makedirs(self.varexdir)
         # TEMPORARY: put paths to folders in the environment
-        HU.setEnv('PE_c_folder', '%s'%self.varexdir.replace('/gpfs/', 't:/'))
-        self.lambdadir = self.measurement_path+os.sep+'lambda'
-        os.mkdir(self.lambdadir)
-        HU.setEnv('Lambda_hr_folder', self.lambdadir)
+        #HU.setEnv('PE_c_folder', '%s'%self.varexdir.replace('/gpfs/', 't:/'))
+        #self.lambdadir = self.measurement_path+os.sep+'lambda'
+        #os.mkdir(self.lambdadir)
+        #HU.setEnv('Lambda_hr_folder', self.lambdadir)
+        self.eigerdir = os.path.join(self.measurement_path, 'Eiger')
+        os.makedirs(self.eigerdir)
 
-        os.mkdir(self.measurement_path+os.sep+'DIC')
-        os.mkdir(self.measurement_path+os.sep+'LPA')
-        HU.setEnv('LPA_folder', self.measurement_path.replace('/gpfs/', 't:/')+os.sep+'LPA')
-        HU.setEnv('DIC_folder', self.measurement_path+os.sep+'DIC')
+        #os.mkdir(self.measurement_path+os.sep+'DIC')
+        #os.mkdir(self.measurement_path+os.sep+'LPA')
+        #HU.setEnv('LPA_folder', self.measurement_path.replace('/gpfs/', 't:/')+os.sep+'LPA')
+        #HU.setEnv('DIC_folder', self.measurement_path+os.sep+'DIC')
 
     def load_directory(self):
         if not os.path.isabs(self.measurement_path):
@@ -219,38 +224,41 @@ class Measurement:
         if not os.path.exists(self.measurement_path):
             print(SE+'Directory does not exist'+EE)
             raise Exception
-        
+
         with open(self.logFile+'.json', 'r') as l:
             grains = json.safe_load(l)
         for g in grains.keys():
             globals()[g] = Grain(g, self.logger)
-        
+
 
     def temp_setup_detector_folders(self):
-        self.varex = PT.DeviceProxy('hasep21eh3:10000/p21/MultiXRDTango/hasep21perk02')
+        self.varex = PT.DeviceProxy('hasep21eh3:10000/p21/Varex/3')
         self.Lambda = PT.DeviceProxy('hasmlmbd02:10000/petra3/lambda/01')
-        self.varex.AllStopAcq()
+
+        self.varex.StopAcq()
         self.Lambda.StopAcq()
         time.sleep(0.2)
-        self.varex.FileDir1 = self.varexdir.replace('/gpfs/', 't:/')
-        self.varex.FileName1 = 'PE1_%I.tif'
-        self.varex.FileName2 = 'PE2_%I.tif'
+        self.varex.FileDir = self.varexdir.replace('/gpfs/', 't:/')
+        self.varex.FileName = 'PE1_%I.tif'
         self.Lambda.SaveFilePath = self.lambdadir
 
 
 
 
     def create_logfile(self):
-        self.logfile = self.measurement_path + os.sep + 'log.log'
+        self.logfile = os.path.join(self.measurement_path, 'log.log')
         with open(self.logfile, 'w') as log:
             log.write('%f, %s: logfile for single grain diffraction created\n' % (time.time(), time.asctime()))
 
 
-    def write_log(self, mess, addtime=True):
+    def write_log(self, mess, addtime=True, nonl=False):
         with open(self.logfile, 'a') as log:
             if addtime:
                 log.write('%f, %s: ' %(time.time(), time.asctime()))
-            log.write(mess+'\n')
+            if nonl:
+                log.write(mess+' ')
+            else:
+                log.write(mess+'\n')
 
 
     def log_positions(self, addtime=True):
@@ -267,7 +275,7 @@ class Measurement:
 #    def _cleanup(self, really=False):
 #        import shutil
 #        if really:
-#            try:
+#            try:sys.path.append('/home/p212user/s
 #                shutil.rmtree(self.measurement_path)
 #            except OSError as e:
 #                print("Error: %s : %s" % (self.measurement_path, e.strerror))
@@ -311,7 +319,7 @@ class logger(object):
 
     def register(self, obj):
         self.objList[obj.name] = obj
-    
+
     def _backup(self):
         if os.path.exists(self.j):
             shutil.copy2(self.j, self.j+'_bak')
@@ -355,14 +363,14 @@ class TestGrain(object):
         self.integRes = [([-6,-5,-4,-3,-2,-1,0,1,2,3,4,5,6],[1,2,3,4,5,6,7,6,5,4,23,2,1]),]
         self.fitpars = [{'s': 12, 'b': 423.2},]
         self.positions = [{'y': 0.12, 'z': -1.2, 'o': 213.84},]
-        
 
-l = logger('/home/hegedues/Documents/snippets/crap')
-print(vars(l))
-g1 = TestGrain('grain1', l)
-g3 = TestGrain('grain22', l)
-print(vars(l))
-l.logNow()
+
+#l = logger('/home/hegedues/Documents/snippets/crap')
+#print(vars(l))
+#g1 = TestGrain('grain1', l)
+#g3 = TestGrain('grain22', l)
+#print(vars(l))
+#l.logNow()
 
 
 
@@ -375,12 +383,14 @@ class Grain(object):
     def __init__(self, M, name=None, grdct=None):
         self.name=name
         self.M = M
-        self.M.logger.register(self.name)
+        self.M.logger.register(self)
         self._ypos = [self.M.devs_mov['mot_hor']['dev'].position]
         self._zpos = [self.M.devs_mov['mot_ver']['dev'].position]
         self._rotpos = [self.M.devs_mov['mot_rot']['dev'].position]
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
         self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
+
+
 
         if grdct is not None:
             self._loadGrainFromFile(grdct)
@@ -389,7 +399,7 @@ class Grain(object):
             self.positions = []
             self._appendPos()
             self.timestamp = [time.asctime()]
-            self.action['initGrain']
+            self.action = ['initGrain']
             self.direction = ['?']
             self.detector = ['?']
             self.slit = []
@@ -399,6 +409,8 @@ class Grain(object):
             self.integRes = [['?'],]
             self.fitpars = [{'?': '?'}]
             self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
+            self.M.logger.logNow()
+
 
         # self.roi  = None
         # self.Lroi = None
@@ -417,7 +429,7 @@ class Grain(object):
         self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
         self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
 
-        self.M.write_log('"%s" grain object defined with positions:' % (self.name))
+        self.M.write_log('"%s" grain object defined with positions:' % (self.name), nonl=True)
         self.M.log_positions(addtime=False)
 
         if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor, self.detmot_ver)
@@ -438,19 +450,19 @@ class Grain(object):
         '''
         Append the current slit positions to the self.slit list
         '''
-        dct = {'top': self.M.devs.mov['mot_st']['dev'].position,
-               'bottom': self.M.devs.mov['mot_sb']['dev'].position,
-               'inboard': self.M.devs.mov['mot_si']['dev'].position,
-               'outboard': self.M.devs.mov['mot_so']['dev'].position}
+        dct = {'top': self.M.devs_mov['mot_st']['dev'].position,
+               'bottom': self.M.devs_mov['mot_sb']['dev'].position,
+               'inboard': self.M.devs_mov['mot_si']['dev'].position,
+               'outboard': self.M.devs_mov['mot_so']['dev'].position}
         self.slit.append(dct)
 
     def _appendROI(self):
         '''
-        Append the curent ROIs for all detectors defined in the measurement 
+        Append the curent ROIs for all detectors defined in the measurement
         '''
         dct = {}
         for ch,d in self.M.detChannels.items():
-            dct[d] = self.cROIs[d]
+            dct[d] = self.cROIs[str(ch)]
         self.ROIs.append(dct)
 
     def getScanID(self):
@@ -519,9 +531,11 @@ class Grain(object):
                           self.mot_rot, self.current_pos()[2]))
 
 
-    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, logger=None):
+    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, log=True):
         if channel == 1:
             self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
+        if channel == 2:
+            self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
         if channel == 3:
             self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
         # move slits:
@@ -529,17 +543,19 @@ class Grain(object):
 
         if channel == 3:
             self.M.Lambda.StopAcq()
+            time.sleep(0.1)
+            self.M.Lambda.SaveAllImages = True
+        elif channel == 2:
+            self.spock.magic('_eigerLive off')
         elif channel == 1:
             self.M.varex.AllStopAcq()
         time.sleep(0.1)
-        self.M.Lambda.SaveAllImages = True
-        time.sleep(0.1)
 
-        positions, res, self.cROIs[channel], fio = _func.center('h', start, end, NoSteps, rotstart, rotend,
-                                                                exposure=exposure, channel=channel, roi=self.cROIs[channel])
+        positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
+                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
         # if channel == 1:
         #     if not self.roi:
-        #         positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, 
+        #         positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend,
         #                                                      exposure=exposure, channel=channel, roi=self.roi)
         #     else:
         #         positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
@@ -553,7 +569,7 @@ class Grain(object):
         #                                             channel=channel, roi=self.Lroi)
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
             self.spock.magic('umv idty2 %.3f' % res['cen'])
@@ -562,18 +578,18 @@ class Grain(object):
             self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
-        if logger is not None:
+        if log:
             self._appendPos()
             self.timestamp.append(time.asctime())
             self.action.append('centerH')
             self.direction.append('H')
-            self.detector.append(self.M.detChannels[channel])
+            self.detector.append(self.M.detChannels[str(channel)])
             self._appendSlitPos()
             self.scanID.append(self.getScanID())
             self._appendROI()
-            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.integRes.append({'pos': positions, 'int': ['?']})  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
-            self.logger.logNow()
+            self.M.logger.logNow()
 
         #self.new_pos()
 
@@ -630,7 +646,7 @@ class Grain(object):
             self._appendROI()
             self.integRes.append((positions, []))  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
-            self.logger.logNow()
+            self.M.logger.logNow()
 
         #self.new_pos()
 
@@ -689,7 +705,7 @@ class Grain(object):
             self._appendROI()
             self.integRes.append((positions, []))  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
-            self.logger.logNow()
+            self.M.logger.logNow()
 
         #self.new_pos()
 
@@ -720,7 +736,7 @@ class Grain(object):
             self._appendROI()
             self.integRes.append((['?'], ['?']))
             self.fitpars.append({'cen': '?', 'fwhm': '?'})
-            self.logger.logNow()
+            self.M.logger.logNow()
 
 
 
@@ -758,7 +774,7 @@ class Grain(object):
             self._appendROI()
             self.integRes.append((['?'], ['?']))
             self.fitpars.append({'cen': '?', 'fwhm': '?'})
-            self.logger.logNow()
+            self.M.logger.logNow()
 
 
 
