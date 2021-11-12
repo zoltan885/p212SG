@@ -425,11 +425,11 @@ class Grain(object):
         '''
         Append the current motor positions to the self.positions list
         '''
-        dct = {'y': self._ypos,
-              'z': self._zpos,
-              'o': self._rotpos,
-              'det_y': self._dethpos,
-              'det_z': self._detvpos}
+        dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
+              'z': self.M.devs_mov['mot_ver']['dev'].position,
+              'o': self.M.devs_mov['mot_rot']['dev'].position,
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
+              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
         self.positions.append(dct)
 
     def _appendSlitPos(self):
@@ -478,46 +478,64 @@ class Grain(object):
 #        self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
 
 
-    def new_pos(self, ypos=None, zpos=None, Opos=None):
-        self._ypos.append(self.M.devs_mov['mot_hor']['dev'].position)
-        self._zpos.append(self.M.devs_mov['mot_ver']['dev'].position)
-        self._rotpos.append(self.M.devs_mov['mot_rot']['dev'].position)
-        self._dethpos.append(self.M.devs_mov['mot_ff_det_hor']['dev'].position)
-        self._detvpos.append(self.M.devs_mov['mot_ff_det_ver']['dev'].position)
-        self.M.write_log('New position defined for "%s"' % self.name)
-        self.M.log_positions()
+    # def new_pos(self, ypos=None, zpos=None, Opos=None):
+    #     self._ypos.append(self.M.devs_mov['mot_hor']['dev'].position)
+    #     self._zpos.append(self.M.devs_mov['mot_ver']['dev'].position)
+    #     self._rotpos.append(self.M.devs_mov['mot_rot']['dev'].position)
+    #     self._dethpos.append(self.M.devs_mov['mot_ff_det_hor']['dev'].position)
+    #     self._detvpos.append(self.M.devs_mov['mot_ff_det_ver']['dev'].position)
+    #     self.M.write_log('New position defined for "%s"' % self.name)
+    #     self.M.log_positions()
 
 
+    # def current_pos(self):
+    #     return [self._ypos[-1], self._zpos[-1], self._rotpos[-1], self._dethpos[-1], self._detvpos[-1]]
     def current_pos(self):
-        return [self._ypos[-1], self._zpos[-1], self._rotpos[-1], self._dethpos[-1], self._detvpos[-1]]
+        return self.positions[-1]
 
-
+    # def all_pos(self):
+    #     return [self._ypos, self._zpos, self._rotpos, self._dethpos, self._detvpos]
     def all_pos(self):
-        return [self._ypos, self._zpos, self._rotpos, self._dethpos, self._detvpos]
+        return self.positions
 
 
-    def goto_grain_center(self, Lambda=False):
-        #cp = self.current_pos()
-        #command = 'umv %s %f %s %f %s %f' % \
-        #                 (self.mot_hor, self.current_pos()[0],
-        #                  self.mot_ver, self.current_pos()[1],
-        #                  self.mot_rot, self.current_pos()[2])
-        #if DEBUG: print(command)
-        if Lambda:
-            self.spock.magic('umv %s %f %s %f %s %f %s %f %s %f' %
-                         (self.mot_hor, self.current_pos()[0],
-                          self.mot_ver, self.current_pos()[1],
-                          self.mot_rot, self.current_pos()[2],
-                          self.detmot_hor, self.current_pos()[3],
-                          self.detmot_ver, self.current_pos()[4]))
-        else:
-            self.spock.magic('umv %s %f %s %f %s %f' %
-                         (self.mot_hor, self.current_pos()[0],
-                          self.mot_ver, self.current_pos()[1],
-                          self.mot_rot, self.current_pos()[2]))
+    # def goto_grain_center(self, Lambda=False):
+    #     #cp = self.current_pos()
+    #     #command = 'umv %s %f %s %f %s %f' % \
+    #     #                 (self.mot_hor, self.current_pos()[0],
+    #     #                  self.mot_ver, self.current_pos()[1],
+    #     #                  self.mot_rot, self.current_pos()[2])
+    #     #if DEBUG: print(command)
+    #     if Lambda:
+    #         self.spock.magic('umv %s %f %s %f %s %f %s %f %s %f' %
+    #                      (self.mot_hor, self.current_pos()[0],
+    #                       self.mot_ver, self.current_pos()[1],
+    #                       self.mot_rot, self.current_pos()[2],
+    #                       self.detmot_hor, self.current_pos()[3],
+    #                       self.detmot_ver, self.current_pos()[4]))
+    #     else:
+    #         self.spock.magic('umv %s %f %s %f %s %f' %
+    #                      (self.mot_hor, self.current_pos()[0],
+    #                       self.mot_ver, self.current_pos()[1],
+    #                       self.mot_rot, self.current_pos()[2]))
+    def goto_grain_center(self, farDet=False, careful=True):
+        cp = self.current_pos()
+        command = 'umv %s %f %s %f %s %f' % (self.mot_hor, cp['y'], self.mot_ver, cp['z'], self.mot_rot, cp['o'])
+        if farDet:
+            command.append(' %s %f %s %f' % (self.detmot_hor, cp['det_y'], self.detmot_ver, cp['det_z']))
+        if DEBUG:
+            print(command)
+        if careful:
+            dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
+              'z': self.M.devs_mov['mot_ver']['dev'].position,
+              'o': self.M.devs_mov['mot_rot']['dev'].position,
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
+              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+            print('Moving from: %s' % dct)
+        self.spock.magic(command)
 
 
-    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, log=True):
+    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
         if channel == 1:
             self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
         if channel == 2:
@@ -567,7 +585,7 @@ class Grain(object):
         #self.new_pos()
 
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, log=True):
+    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
         if channel == 1:
             self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
         if channel == 2:
@@ -616,7 +634,7 @@ class Grain(object):
 
         #self.new_pos()
 
-    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1, auto=False, mode=24, log=True):
+    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=2, auto=False, mode=24, log=True):
         if channel == 1:
             self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
         if channel == 2:
@@ -665,8 +683,34 @@ class Grain(object):
 
         #self.new_pos()
 
+    def recenter(self, imsource=None, channel=2):
+        if imsource is not None:
+            self.cROIs[str(channel)], _ = _func.explorer(imsource)
+            self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[str(channel)], str(self.cROIs[str(channel)]), self.name))
+        else:
+            print(SE+'No image source defined!'+EE)
 
-    def recordMap(self, start, end, NoSteps, exposure=None, channel=3):
+        # rewrite _fioparser such that it returns a dict or an object with the attribute command, parse the command and figure out the motor name from there!
+        #res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=mot)
+
+
+
+
+        if logger is not None:
+            self._appendPos()
+            self.timestamp.append(time.asctime())
+            self.action.append('recenter')
+            self.direction.append('?')
+            self.detector.append(self.M.detChannels[str(channel)])
+            self._appendSlitPos()
+            self.scanID.append('?')
+            self._appendROI()
+            self.integRes.append((['?'], ['?']))
+            self.fitpars.append({'cen': '?', 'fwhm': '?'})
+            self.M.logger.logNow()
+
+
+    def recordMap(self, start, end, NoSteps, exposure=None, channel=2):
         if exposure is None:
             raise ValueError('Exposure time not given')
         self.M.set_slit_size(LARGEBEAM)
@@ -696,7 +740,7 @@ class Grain(object):
 
 
 
-    def redef_ROI(self, imsource=None, channel=None):
+    def redef_ROI(self, imsource=None, channel=2):
         '''
         TODO: this should watch out if the right channel is given,
         currently it can not, because the explorer does not report which detector it used
@@ -734,7 +778,7 @@ class Grain(object):
 
 
 
-    def showMap(self, fiofile, maxint, channel=3):
+    def showMap(self, fiofile, maxint, channel=2):
         _func.showMap(fiofile, roi=self.cROIs[str(channel)], maxint=maxint)
 
 

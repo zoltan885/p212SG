@@ -689,7 +689,8 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     if roi is None:
         roi, roiNP = explorer(scanFileName)
     positions = fiodata[mot]
-    if DEBUG: print('Positions: %d' % len(positions))
+    if DEBUG:
+        print('Positions: %d' % len(positions))
     res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
     return positions, res, roi, scanFileName
 
@@ -750,7 +751,7 @@ def getProj(imageArray, roi, projAxis=0):
     return np.array(projections)
 
 
-def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
+def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=95, save=False):
     '''
     creates a map from an already existing measurement
     '''
@@ -773,20 +774,35 @@ def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
 
     azimutalMap = getProj(imageArray, roi, projAxis=0)
 
+    # fig = plt.figure()
+    # ax = fig.add_subplot(111)
+    # ax.set_ylabel('omega angle [deg]')
+    # ax.set_title('%s' % fiofile)
+
+    # Set up the axes with gridspec
     fig = plt.figure()
-    ax = fig.add_subplot(111)
-    ax.set_ylabel('omega angle [deg]')
-    ax.set_title('%s' % fiofile)
+    grid = plt.GridSpec(4, 4, hspace=0.5, wspace=0.5)
+    main_ax = fig.add_subplot(grid[:-1, 1:])
+    main_ax.set_ylabel('omega angle [deg]')
+    main_ax.set_title('%s' % fiofile)
+    y_hist = fig.add_subplot(grid[:-1, 0], xticklabels=[], sharey=main_ax)
+    x_hist = fig.add_subplot(grid[-1, 1:], yticklabels=[], sharex=main_ax)
+
+
+
+
+    if maxint is None:
+        maxint = np.percentile(azimutalMap[:, ::-1], percentile)
 
     if etascale:
         dist = 1100 # Lambda dist from direct beam [mm]
-        ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
+        main_ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
 
-        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
+        plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, 1000*azimutalMap.shape[1]*0.055/dist, omega[0], omega[-1]], aspect='auto')
     else:
-        ax.set_xlabel('eta [unscaled, pix]')
-        plot = ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
+        main_ax.set_xlabel('eta [unscaled, pix]')
+        plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect='auto')
 
     if save:
