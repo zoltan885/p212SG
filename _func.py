@@ -449,31 +449,6 @@ def integrateROI(data, ROI, dark=None, show=False):
     return np.mean(img[xmin:xmax, ymin:ymax])
 
 def getIntensities(imsource, roi):
-#    tif,nxs = False,False
-#    if isinstance(imsource, list):
-#        imageList = imsource
-#        tif = True
-#        if DEBUG: print('List of tif files')
-#    elif isinstance(imsource, str):
-#        if imsource.endswith('nxs'):
-#            data = getDataNXSLambda(imsource)
-#            nxs = True
-#            if DEBUG: print('Nexus file')
-#
-#        elif imsource.endswith('.fio'):
-#            il = imagesFromFio(imsource)
-#            print(il)
-#            if isinstance(il, str):
-#                if il.endswith('nxs'):
-#                    data = getDataNXSLambda(il)
-#                    nxs = True
-#            elif isinstance(il, list):
-#                imageList = il
-#                tif = True
-#    else:
-#        raise ValueError('Source format not recognized.')
-#    print(':getIntensities: tif/nxs' , tif, nxs)
-
     tif,nxs,fio,h5 = False,False,False,False
     if isinstance(imsource, list):
         imageList = imsource
@@ -495,27 +470,34 @@ def getIntensities(imsource, roi):
                     data = getDataNXSLambda(il)
                     nxs = True
                 elif il.endswith('.h5'):
-                    data = getEigerDataset(il)
+                    #data = getEigerDataset(il)
                     h5 = True
             elif isinstance(il, list):
                 imageList = il
                 tif = True
         elif imsource.endswith('.h5'):
-            data = getEigerDataset(imsource)
+            #data = getEigerDataset(imsource)
             if DEBUG: print('Eiger file')
             h5 = True
     else:
         raise ValueError('Source format not recognized.')
 
-    print(':getIntensities: tif/nxs' , tif, nxs)
+    #print(':getIntensities: tif/nxs' , tif, nxs)
     intensities = []
+
     if tif:
         for i in imageList:
             im = fabio.open(i).data
             intensities.append(integrateROI(im, roi))
-    elif nxs or h5:
+    elif nxs:
         for i in range(data.shape[0]):
             im = data[i]
+            intensities.append(integrateROI(im, roi))
+    elif h5:  # this would not read the full dataset to memory
+        if fio:
+            imsource = il
+        for i in range(getEigerDataLength(imsource)):
+            im = getEigerDataset(imsource, ind=i)
             intensities.append(integrateROI(im, roi))
     return np.array(intensities)
 
@@ -771,7 +753,8 @@ def getProjMany(h5, roi, etaProjAxis=0, thetaProjAxis=1, correctNegative=False):
         etaProj.append(np.sum(im, axis=etaProjAxis))
         thetaProj.append(np.sum(im, axis=thetaProjAxis))
     if correctNegative:
-        etaProj = np.array(etaProj).clip(min=0)
+        #etaProj = np.array(etaProj).clip(min=0)
+        etaProj[etaProj < 0] = 0
     return np.array(etaProj), np.array(thetaProj)
 
 def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False):
