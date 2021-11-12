@@ -591,7 +591,10 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
         if fwhm > 0.5*scanRange:
             sane = False
 
-        print('center: %.3f\nfwhm: %.3f' % (cen, fwhm))
+        if sane:
+            move = True
+
+        print('center: %.3f\nfwhm: %.3f (moving automatically)' % (cen, fwhm))
         # 2nd try
         if show:
             fig = plt.figure()
@@ -604,11 +607,12 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
             ax.set_ylabel('Intensity')
             ax.set_title(scanFileName+'\n'+str(roi))
             def moveto(self):
-
                 plt.close(fig)
+                # TODO set move=True
             axmoveto = plt.axes([0.05, 0.7, 0.1, 0.075])
             movetoButton = Button(axmoveto, 'Moveto')
             movetoButton.on_clicked(moveto)
+
             plt.show(block=True)
         #if show:
         #    result.plot_fit(numpoints=200)
@@ -621,7 +625,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
 
 
 def center(direction, start, end, NoSteps, rotstart, rotend,
-           exposure=2, channel=1, horizontalCenteringMotor='idty1', verticalCenteringMotor='idtz2', roi=None, auto=False):
+           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
@@ -761,7 +765,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=1000, save=False):
         imageArray = getDataNXSLambda(image)
     if image.endswith('.h5'):
         imageArray = getEigerDataset(image)
-        raise ValueError('fio file does not point to an nxs or h5 file')
+        #raise ValueError('fio file does not point to an nxs or h5 file')
     if roi is None:
         roi, roiNP = explorer(fiofile, ROI=False)
 

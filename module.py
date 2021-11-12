@@ -45,9 +45,9 @@ EE = '\033[0m'
 
 DEFEXPTIME = 0.5
 
-HORIZONTALBEAM = {'eh3st': 0.01, 'eh3sb': 0.01, 'eh3so': 0.1, 'eh3si': 0.1}
-VERTICALBEAM   = {'eh3st': 0.1, 'eh3sb': 0.1, 'eh3so': 0.01, 'eh3si': 0.01}
-LARGEBEAM      = {'eh3st': 0.1, 'eh3sb': 0.1, 'eh3so': 0.1, 'eh3si': 0.1}
+HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
+VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
+LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 
 
 
@@ -64,15 +64,15 @@ def _prepare_config_file(path):
         f.write('# Alternatively local spock names may also be used\n')
         f.write('# Comment lines begin with hashtag and empty lines are discarded.\n\n')
         f.write('# horizontal motor\n')
-        f.write('mot_hor: idty1\n')
+        f.write('mot_hor: idty2\n')
         f.write('# vertical motor\n')
         f.write('mot_ver: idtz2\n')
         f.write('# omega rotation motor\n')
         f.write('mot_rot: idrz1\n')
         f.write('# far field detector y motor\n')
-        f.write('mot_ff_det_hor: \n')
+        f.write('mot_ff_det_hor: p2ty\n')
         f.write('# far field detector z motor\n')
-        f.write('mot_ff_det_ver: \n')
+        f.write('mot_ff_det_ver: p2tz\n')
         f.write('# top slit\n')
         f.write('mot_st: eh3st\n')
         f.write('# bottom slit\n')
@@ -225,8 +225,8 @@ class Measurement:
             print(SE+'Directory does not exist'+EE)
             raise Exception
 
-        with open(self.logFile+'.json', 'r') as l:
-            grains = json.safe_load(l)
+        with open(self.logF+'.json', 'r') as l:
+            grains = json.load(l)
         for g in grains.keys():
             globals()[g] = Grain(g, self.logger)
 
@@ -272,16 +272,6 @@ class Measurement:
             log.write('\n')
 
 
-#    def _cleanup(self, really=False):
-#        import shutil
-#        if really:
-#            try:sys.path.append('/home/p212user/s
-#                shutil.rmtree(self.measurement_path)
-#            except OSError as e:
-#                print("Error: %s : %s" % (self.measurement_path, e.strerror))
-#            if DEBUG: print('Measurement directory deleted')
-
-
     def comment(self, comm):
         self.write_log('USER: ' + comm)
 
@@ -296,10 +286,6 @@ class Measurement:
             c = c + ('%s %.3f ' %(m,p))
         self.spock.magic(c)
         self.write_log('Slits set to: %s' % posdict)
-
-
-
-
 
 '''
 general class for grain Candidates
@@ -539,7 +525,7 @@ class Grain(object):
         if channel == 3:
             self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
         # move slits:
-        #self.M.set_slit_size(VERTICALBEAM)
+        self.M.set_slit_size(VERTICALBEAM)
 
         if channel == 3:
             self.M.Lambda.StopAcq()
@@ -548,25 +534,12 @@ class Grain(object):
         elif channel == 2:
             self.spock.magic('_eigerLive off')
         elif channel == 1:
-            self.M.varex.AllStopAcq()
+            pass
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
                                                                 exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
-        # if channel == 1:
-        #     if not self.roi:
-        #         positions, res, self.roi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend,
-        #                                                      exposure=exposure, channel=channel, roi=self.roi)
-        #     else:
-        #         positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                            channel=channel, roi=self.roi)
-        # if channel == 3:
-        #     if not self.Lroi:
-        #         positions, res, self.Lroi, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                            channel=channel, roi=self.Lroi)
-        #     if self.Lroi:
-        #         positions, res, _, fio = _func.center('h', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                             channel=channel, roi=self.Lroi)
+
 
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
@@ -587,104 +560,87 @@ class Grain(object):
             self._appendSlitPos()
             self.scanID.append(self.getScanID())
             self._appendROI()
-            self.integRes.append({'pos': positions, 'int': ['?']})  # TODO: expose the intensity?
+            self.integRes.append({'pos': list(positions), 'int': ['?']})  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
 
         #self.new_pos()
 
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, logger=None):
+    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=1, auto=False, log=True):
         if channel == 1:
             self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
+        if channel == 2:
+            self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
         if channel == 3:
             self.M.write_log('Vertical centering with Lambda on grain: %s' % self.name)
         # move slits:
-        #self.M.set_slit_size(HORIZONTALBEAM)
+        self.M.set_slit_size(HORIZONTALBEAM)
 
         if channel == 3:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
+        elif channel == 2:
+            self.spock.magic('_eigerLive off')
         elif channel == 1:
-            self.M.varex.AllStopAcq()
+            pass
         time.sleep(0.1)
-        positions, res, self.cROIs[channel], fio = _func.center('v', start, end, NoSteps, rotstart, rotend,
-                                                                exposure=exposure, channel=channel, roi=self.cROIs[channel])
-        # if channel == 1:
-        #     if not self.roi:
-        #         positions, res, self.roi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure, channel=channel, roi=self.roi)
-        #     else:
-        #         positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                            channel=channel, roi=self.roi)
-        # if channel == 3:
-        #     if not self.Lroi:
-        #         positions, res, self.Lroi, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                            channel=channel, roi=self.Lroi)
-        #     else:
-        #         positions, res, _, fio = _func.center('v', start, end, NoSteps, rotstart, rotend, exposure=exposure,
-        #                                             channel=channel, roi=self.Lroi)
+
+        positions, res, self.cROIs[str(channel)], fio = _func.center('v', start, end, NoSteps+1, rotstart, rotend,
+                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
+
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
             self.spock.magic('umv idtz2 %.3f' % res['cen'])
 
         if auto:
-            self.spock.magic('umv %s %f'%(self.mot_ver, res['cen']))
+            self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
-        if logger is not None:
+        if log:
             self._appendPos()
             self.timestamp.append(time.asctime())
-            self.action.append('centerV')
-            self.direction.append('V')
-            self.detector.append(self.M.detChannels[channel])
+            self.action.append('centerH')
+            self.direction.append('H')
+            self.detector.append(self.M.detChannels[str(channel)])
             self._appendSlitPos()
             self.scanID.append(self.getScanID())
             self._appendROI()
-            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.integRes.append({'pos': list(positions), 'int': ['?']})  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
 
         #self.new_pos()
 
-    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1, auto=False, mode=24, logger=False):
+    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=1, auto=False, mode=24, log=True):
         if channel == 1:
             self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
+        if channel == 2:
+            self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
         if channel == 3:
             self.M.write_log('Angular centering with Lambda on grain: %s' % self.name)
         # move slits:
-        #self.M.set_slit_size(LARGEBEAM)
+        self.M.set_slit_size(LARGEBEAM)
 
         if channel == 3:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-            if mode == 24:
-                print('Setting up Lambda 24 bit mode')
-                self.M.Lambda.OperatingMode = 'TwentyFourBit'
-                time.sleep(0.2)
+        elif channel == 2:
+            self.spock.magic('_eigerLive off')
         elif channel == 1:
-            self.M.varex.AllStopAcq()
+            pass
         time.sleep(0.1)
 
-        positions, res, self.cROIs[channel], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[channel])
+        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
 
-        # if channel == 1:
-        #     if not self.roi:
-        #         positions, res, self.roi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
-        #     else:
-        #         positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.roi)
-        # if channel == 3:
-        #     if not self.Lroi:
-        #         positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
-        #     else:
-        #         positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.cROIs[channel], addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         print(res['moveto'])
         if res['moveto']:
@@ -699,11 +655,11 @@ class Grain(object):
             self.timestamp.append(time.asctime())
             self.action.append('centerO')
             self.direction.append('O')
-            self.detector.append(self.M.detChannels[channel])
+            self.detector.append(self.M.detChannels[str(channel)])
             self._appendSlitPos()
             self.scanID.append(self.getScanID())
             self._appendROI()
-            self.integRes.append((positions, []))  # TODO: expose the intensity?
+            self.integRes.append({'pos': list(positions), 'int': ['?']})  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
 
@@ -718,8 +674,8 @@ class Grain(object):
         time.sleep(0.1)
         self.M.Lambda.SaveAllImages = True
 
-        positions, res, self.cROIs[channel], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure,
-                                                                     channel=channel, roi=self.cROIs[channel])
+        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure,
+                                                                     channel=channel, roi=self.cROIs[str(channel)])
         # if not self.Lroi:
         #     positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
         # else:
@@ -730,7 +686,7 @@ class Grain(object):
             self.timestamp.append(time.asctime())
             self.action.append('recordMap')
             self.direction.append('?')
-            self.detector.append(self.M.detChannels[channel])
+            self.detector.append(self.M.detChannels[str(channel)])
             self._appendSlitPos()
             self.scanID.append(self.getScanID())
             self._appendROI()
@@ -746,8 +702,8 @@ class Grain(object):
         currently it can not, because the explorer does not report which detector it used
         '''
         if imsource is not None:
-            self.cROIs[channel], _ = _func.explorer(imsource)
-            self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[channel], str(self.cROIs[channel]), self.name))
+            self.cROIs[str(channel)], _ = _func.explorer(imsource)
+            self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[str(channel)], str(self.cROIs[str(channel)]), self.name))
             # if channel == 1:
             #     self.roi, _ = _func.explorer(imsource)
             #     self.M.write_log('Varex ROI redefined: %s for grain %s' % (self.roi, self.name))
@@ -768,7 +724,7 @@ class Grain(object):
             self.timestamp.append(time.asctime())
             self.action.append('redefROI')
             self.direction.append('?')
-            self.detector.append(self.M.detChannels[channel])
+            self.detector.append(self.M.detChannels[str(channel)])
             self._appendSlitPos()
             self.scanID.append('?')
             self._appendROI()
@@ -779,7 +735,7 @@ class Grain(object):
 
 
     def showMap(self, fiofile, maxint, channel=3):
-        _func.showMap(fiofile, roi=self.cROIs[channel], maxint=maxint)
+        _func.showMap(fiofile, roi=self.cROIs[str(channel)], maxint=maxint)
 
 
 
