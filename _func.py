@@ -759,6 +759,16 @@ def getProj(imageArray, roi, projAxis=0):
         projections.append(np.sum(im, axis=projAxis))
     return np.array(projections)
 
+def getProjMany(h5, roi, projAxis=0):
+    projections = []
+    xmin = roi['ymin']
+    xmax = roi['ymax']
+    ymin = roi['xmin']
+    ymax = roi['xmax']
+    for i in range(getEigerDataLength(h5)):
+        im = getEigerDataset(h5, i)[xmin:xmax, ymin:ymax]
+        projections.append(np.sum(im, axis=projAxis))
+    return np.array(projections)
 
 def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False):
     '''
@@ -769,19 +779,21 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
 
     image = imagesFromFio(fiofile, channel=3)
+    assert roi is not None, 'ROI has to be defined and passed on to this function'
     if not isinstance(image, str):
         raise ValueError('fio file contains several images... Supposed to be a single nxs/h5 file')
     if image.endswith('.nxs'):
         imageArray = getDataNXSLambda(image)
+        azimutalMap = getProj(imageArray, roi, projAxis=0)
     if image.endswith('.h5'):
-        imageArray = getEigerDataset(image)
+        azimutalMap = getProjMany(image, roi, projAxis=0)
+        #imageArray = getEigerDataset(image)
         #raise ValueError('fio file does not point to an nxs or h5 file')
-    if roi is None:
-        roi, roiNP = explorer(fiofile, ROI=False)
+
 
     print("Using roi: %s"%roi)
 
-    azimutalMap = getProj(imageArray, roi, projAxis=0)
+    
 
     # Set up the axes with gridspec
     fig = plt.figure()
