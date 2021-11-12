@@ -113,11 +113,11 @@ def _fioparser(fn=None, onlyexp=True):
             channelNo = int(i.lower().partition('_')[0][-1])
             savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
 
-    return data, savedir
+    return data, savedir, command
 
 
 def imagesFromFio(fiofile, channel=1):
-    data, savedir = _fioparser(fiofile)
+    data, savedir, _ = _fioparser(fiofile)
     # lambda or only one tif image
     if len(set(data['filename'])) == 1:
         channel=2   # TODO
@@ -169,7 +169,7 @@ def explorer(imsource, ROI=None):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir,_ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
             il = imagesFromFio(imsource)
             print(il)
@@ -486,7 +486,7 @@ def getIntensities(imsource, roi):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir, _ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
             il = imagesFromFio(imsource)
             print(il)
@@ -520,7 +520,7 @@ def getIntensities(imsource, roi):
     return np.array(intensities)
 
 
-def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
+def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofitpos=True):
     '''
     TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
     :param scanFileName: fio file of the scan to fit
@@ -536,9 +536,15 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
     except:
         raise ImportError('gitGauss func: could not import...')
 
-    fiodata, path = _fioparser(scanFileName)
+    fiodata, path, command = _fioparser(scanFileName)
     ya = getIntensities(scanFileName, roi) # here we also read back every clearing frame from the beamline file system, not good
     # filtering for exposure frames
+    if motor is None:
+        motor = command.split(' ')[1]
+        if motor == 'idrz1':
+            motor = 'idrz1(encoder)'
+        if DEBUG:
+            print('Motor determined from fio file as: %s', motor)
     x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
     # one would need to know if this was a supersweep or a fastsweep
     # if it was a fastsweep then x needs to be incremented by half the stepsize (this is temporary, eventually the end position will be implemented in the fio)
@@ -591,10 +597,12 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
         if fwhm > 0.5*scanRange:
             sane = False
 
-        if sane:
+        if sane and gotofitpos:
             move = True
-
-        print('center: %.3f\nfwhm: %.3f (moving automatically)' % (cen, fwhm))
+        if move:
+            print('center: %.3f\nfwhm: %.3f (moving automatically)' % (cen, fwhm))
+        else:
+            print('center: %.3f\nfwhm: %.3f' % (cen, fwhm))
         # 2nd try
         if show:
             fig = plt.figure()
@@ -609,9 +617,10 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=True):
             def moveto(self):
                 plt.close(fig)
                 # TODO set move=True
-            axmoveto = plt.axes([0.05, 0.7, 0.1, 0.075])
-            movetoButton = Button(axmoveto, 'Moveto')
-            movetoButton.on_clicked(moveto)
+            if gotoButton:
+                axmoveto = plt.axes([0.05, 0.7, 0.1, 0.075])
+                movetoButton = Button(axmoveto, 'Moveto')
+                movetoButton.on_clicked(moveto)
 
             plt.show(block=True)
         #if show:
@@ -683,7 +692,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
 
     supersweepOut = HU.runMacro(supersweepCommand)
     time.sleep(0.1)
-    fiodata, path = _fioparser(scanFileName)
+    fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
     # get ROI:
     if roi is None:
@@ -691,7 +700,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     positions = fiodata[mot]
     if DEBUG:
         print('Positions: %d' % len(positions))
-    res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
+    res = fitGauss(scanFileName, roi, motor=mot)
     return positions, res, roi, scanFileName
 
 
@@ -722,7 +731,7 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     print(sweepCommand)
     sweepOut = HU.runMacro(sweepCommand)
     time.sleep(0.1)
-    fiodata, path = _fioparser(scanFileName)
+    fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
 
     # get ROI:
@@ -730,7 +739,7 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
         roi, roiNP = explorer(scanFileName)
     positions = fiodata[mot]
     if DEBUG: print('Positions: %d' % len(positions))
-    res = fitGauss(scanFileName, roi, motor=mot, show=not auto)
+    res = fitGauss(scanFileName, roi, motor=mot)
     return positions, res, roi, scanFileName
 
 
@@ -751,11 +760,11 @@ def getProj(imageArray, roi, projAxis=0):
     return np.array(projections)
 
 
-def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=95, save=False):
+def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False):
     '''
     creates a map from an already existing measurement
     '''
-    d, savedir = _fioparser(fiofile)
+    d, savedir, _ = _fioparser(fiofile)
     omega = np.array(d['idrz1(encoder)'])
     omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
 
@@ -774,36 +783,39 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=95, save=
 
     azimutalMap = getProj(imageArray, roi, projAxis=0)
 
-    # fig = plt.figure()
-    # ax = fig.add_subplot(111)
-    # ax.set_ylabel('omega angle [deg]')
-    # ax.set_title('%s' % fiofile)
-
     # Set up the axes with gridspec
     fig = plt.figure()
     grid = plt.GridSpec(4, 4, hspace=0.5, wspace=0.5)
-    main_ax = fig.add_subplot(grid[:-1, 1:])
-    main_ax.set_ylabel('omega angle [deg]')
-    main_ax.set_title('%s' % fiofile)
-    y_hist = fig.add_subplot(grid[:-1, 0], xticklabels=[], sharey=main_ax)
-    x_hist = fig.add_subplot(grid[-1, 1:], yticklabels=[], sharex=main_ax)
 
+    y_hist = fig.add_subplot(grid[:-1, 0], xticklabels=[])
+    x_hist = fig.add_subplot(grid[-1, 1:], yticklabels=[])
+    main_ax = fig.add_subplot(grid[:-1, 1:4], sharey=y_hist, sharex=x_hist)
+    y_hist.set_ylabel('omega angle [deg]')
+    main_ax.set_title('%s' % fiofile)
+    main_ax.get_yaxis().set_visible(False)
+
+
+    y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
 
 
 
     if maxint is None:
+        print('Using %.0f percentile as max' % percentile)
         maxint = np.percentile(azimutalMap[:, ::-1], percentile)
 
     if etascale:
         dist = 1100 # Lambda dist from direct beam [mm]
-        main_ax.set_xlabel('eta [roughly scaled mdeg start set to 0]')
+        x_hist.set_xlabel('eta [roughly scaled mdeg start set to 0]')
 
         plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, 1000*azimutalMap.shape[1]*0.055/dist, omega[0], omega[-1]], aspect='auto')
+        etas = np.linspace(0,1000*azimutalMap.shape[1]*0.055/dist, azimutalMap[:, ::-1].shape[0])
+        x_hist.plot(etas, np.sum(azimutalMap[:, ::-1], axis=0))
     else:
-        main_ax.set_xlabel('eta [unscaled, pix]')
+        x_hist.set_xlabel('eta [unscaled, pix]')
         plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect='auto')
+        x_hist.plot(np.arange(azimutalMap.shape[1]), np.sum(azimutalMap[:, ::-1], axis=0))
 
     if save:
         name = savedir['3']+image.replace('.nxs', '')
@@ -821,18 +833,4 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=95, save=
     fig.colorbar(plot)
     plt.show()
 
-'''
-def evalCentering(fiofile, roi=None):
-    fiodata, path = _fioparser(scanFileName)
-    path = path['%d' % channel]
 
-    # get ROI:
-    if roi is None:
-        roi, roiNP = explorer(fiofile)
-
-    positions = fiodata[mot]
-    if DEBUG: print('Positions: %d' % len(positions))
-
-
-    res = fitGauss(fiofile, roi=roi, positions, show= not auto)
-'''

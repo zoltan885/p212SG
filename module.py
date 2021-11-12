@@ -685,15 +685,16 @@ class Grain(object):
 
     def recenter(self, imsource=None, channel=2):
         if imsource is not None:
-            self.cROIs[str(channel)], _ = _func.explorer(imsource)
+            if False:  # testing
+                ROI,_ = _func.explorer(imsource, ROI=None)
+                res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False)
+                return
+            self.cROIs[str(channel)], _ = _func.explorer(imsource, ROI=None)
             self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[str(channel)], str(self.cROIs[str(channel)]), self.name))
         else:
             print(SE+'No image source defined!'+EE)
-
         # rewrite _fioparser such that it returns a dict or an object with the attribute command, parse the command and figure out the motor name from there!
-        #res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=mot)
-
-
+        res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False)
 
 
         if logger is not None:
