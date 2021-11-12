@@ -759,16 +759,20 @@ def getProj(imageArray, roi, projAxis=0):
         projections.append(np.sum(im, axis=projAxis))
     return np.array(projections)
 
-def getProjMany(h5, roi, projAxis=0):
-    projections = []
+def getProjMany(h5, roi, etaProjAxis=0, thetaProjAxis=1, correctNegative=False):
+    etaProj = []
+    thetaProj = []
     xmin = roi['ymin']
     xmax = roi['ymax']
     ymin = roi['xmin']
     ymax = roi['xmax']
     for i in range(getEigerDataLength(h5)):
         im = getEigerDataset(h5, i)[xmin:xmax, ymin:ymax]
-        projections.append(np.sum(im, axis=projAxis))
-    return np.array(projections)
+        etaProj.append(np.sum(im, axis=etaProjAxis))
+        thetaProj.append(np.sum(im, axis=thetaProjAxis))
+    if correctNegative:
+        etaProj = np.array(etaProj).clip(min=0)
+    return np.array(etaProj), np.array(thetaProj)
 
 def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False):
     '''
@@ -786,14 +790,11 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
         imageArray = getDataNXSLambda(image)
         azimutalMap = getProj(imageArray, roi, projAxis=0)
     if image.endswith('.h5'):
-        azimutalMap = getProjMany(image, roi, projAxis=0)
+        azimutalMap, thetaMap = getProjMany(image, roi, etaProjAxis=0, correctNegative=True)
         #imageArray = getEigerDataset(image)
         #raise ValueError('fio file does not point to an nxs or h5 file')
 
-
     print("Using roi: %s"%roi)
-
-    
 
     # Set up the axes with gridspec
     fig = plt.figure()
@@ -805,11 +806,10 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     y_hist.set_ylabel('omega angle [deg]')
     main_ax.set_title('%s' % fiofile)
     main_ax.get_yaxis().set_visible(False)
-
-
+    th_ax = fig.add_subplot(grid[-1, 0])
+    th_ax.set_xlabel('theta [pix]')
+    
     y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
-
-
 
     if maxint is None:
         print('Using %.0f percentile as max' % percentile)
@@ -828,6 +828,9 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
         plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
                          extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect='auto')
         x_hist.plot(np.arange(azimutalMap.shape[1]), np.sum(azimutalMap[:, ::-1], axis=0))
+        thetaMapScaled = (thetaMap/float(thetaMap.max()))*maxint
+        th_ax.imshow(thetaMapScaled, cmap='jet', vmax=maxint,
+                     extent=[0, thetaMap.shape[1], omega[-1], omega[0]], aspect='auto')
 
     if save:
         name = savedir['3']+image.replace('.nxs', '')
