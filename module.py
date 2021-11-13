@@ -779,8 +779,8 @@ class Grain(object):
 
 
 
-    def showMap(self, fiofile, maxint, channel=2):
-        _func.showMap(fiofile, roi=self.cROIs[str(channel)], maxint=maxint)
+    def showMap(self, fiofile, maxint, channel=2, **kwargs):
+        _func.showMap(fiofile, roi=self.cROIs[str(channel)], maxint=maxint, **kwargs)
 
 
 
