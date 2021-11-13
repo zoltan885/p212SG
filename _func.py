@@ -671,8 +671,10 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
 
     supersweepCommand = 'supersweep %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
     print(supersweepCommand)
-
-    supersweepOut = HU.runMacro(supersweepCommand)
+    try:
+        supersweepOut = HU.runMacro(supersweepCommand)
+    except:
+        return None
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
@@ -711,7 +713,10 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     print(scanFileName)
     sweepCommand = 'fastsweep idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
     print(sweepCommand)
-    sweepOut = HU.runMacro(sweepCommand)
+    try:
+        sweepOut = HU.runMacro(sweepCommand)
+    except:
+        return None
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
@@ -753,11 +758,11 @@ def getProjMany(h5, roi, etaProjAxis=0, thetaProjAxis=1, correctNegative=False):
         etaProj.append(np.sum(im, axis=etaProjAxis))
         thetaProj.append(np.sum(im, axis=thetaProjAxis))
     if correctNegative:
-        #etaProj = np.array(etaProj).clip(min=0)
-        etaProj[etaProj < 0] = 0
+        etaProj = np.array(etaProj).clip(min=0)
+        #etaProj[etaProj < 0] = 0  # this is faster but results in a 1d array !!!
     return np.array(etaProj), np.array(thetaProj)
 
-def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False):
+def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=False, thetaPlot='prof', aspect=None):
     '''
     creates a map from an already existing measurement
     '''
@@ -797,6 +802,8 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     if maxint is None:
         print('Using %.0f percentile as max' % percentile)
         maxint = np.percentile(azimutalMap[:, ::-1], percentile)
+    if aspect is None:
+        aspect = 'auto'
 
     if etascale:
         dist = 1100 # Lambda dist from direct beam [mm]
@@ -809,11 +816,16 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     else:
         x_hist.set_xlabel('eta [unscaled, pix]')
         plot = main_ax.imshow(azimutalMap[:, ::-1], cmap='jet', vmax=maxint, interpolation='none',
-                         extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect='auto')
+                         extent=[0, azimutalMap.shape[1], omega[-1], omega[0]], aspect=aspect)
         x_hist.plot(np.arange(azimutalMap.shape[1]), np.sum(azimutalMap[:, ::-1], axis=0))
-        thetaMapScaled = (thetaMap/float(thetaMap.max()))*maxint
-        th_ax.imshow(thetaMapScaled, cmap='jet', vmax=maxint,
-                     extent=[0, thetaMap.shape[1], omega[-1], omega[0]], aspect='auto')
+        if thetaPlot == 'map':
+            thetaMapScaled = (thetaMap/float(thetaMap.max()))*maxint
+            th_ax.imshow(thetaMapScaled, cmap='jet', vmax=maxint,
+                         extent=[0, thetaMap.shape[1], omega[-1], omega[0]], aspect='auto')
+        elif thetaPlot == 'prof':
+            thetaProf = np.sum(thetaMap, axis=0)
+            th_ax.plot(thetaProf)
+            th_ax.ticklabel_format(axis='y', style='sci', scilimits=(0,0))
 
     if save:
         name = savedir['3']+image.replace('.nxs', '')
