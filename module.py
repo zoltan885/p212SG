@@ -109,8 +109,10 @@ class Measurement:
             print(devices)
         self.devs_mov = {}
         self.devs_aux = {}
+        if not os.path.isabs(path):
+            path = os.path.join('/gpfs/current/raw', path)
         self.measurement_path = path
-        self.logF = path+'/log'
+        self.logF = self.measurement_path + '/log'
         self.logger = logger(self.logF)
         if load:
             self.load_directory()
@@ -187,12 +189,6 @@ class Measurement:
 
 
     def create_directory(self):
-        if not os.path.isabs(self.measurement_path):
-            self.measurement_path = os.path.join('/gpfs/current/raw', self.measurement_path)
-#        if self.measurement_path is not None:
-#            if self.measurement_path[-1] == '/': self.measurement_path = self.measurement_path[:-1]
-#            if self.measurement_path[0] != '/':
-#                self.measurement_path = '/gpfs/current/raw' + os.sep + self.measurement_path
         if os.path.exists(self.measurement_path):
             print(SE+'Directory exists! Please use load=True option when initializing the measurement.'+EE)
             print('Object not instantiated')
@@ -556,7 +552,7 @@ class Grain(object):
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
-                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
+                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)], every=None)
 
 
         self.M.write_log('Logfile: %s' % fio)
@@ -683,7 +679,7 @@ class Grain(object):
 
         #self.new_pos()
 
-    def recenter(self, imsource=None, channel=2):
+    def recenter(self, imsource=None, channel=2, every=None):
         if imsource is not None:
             if False:  # testing
                 ROI,_ = _func.explorer(imsource, ROI=None)
@@ -694,7 +690,7 @@ class Grain(object):
         else:
             print(SE+'No image source defined!'+EE)
         # rewrite _fioparser such that it returns a dict or an object with the attribute command, parse the command and figure out the motor name from there!
-        res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False)
+        res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False, every=every)
 
 
         if logger is not None:

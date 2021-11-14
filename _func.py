@@ -502,7 +502,7 @@ def getIntensities(imsource, roi):
     return np.array(intensities)
 
 
-def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofitpos=True):
+def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofitpos=True, every=None):
     '''
     TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
     :param scanFileName: fio file of the scan to fit
@@ -530,7 +530,20 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
     x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
     # one would need to know if this was a supersweep or a fastsweep
     # if it was a fastsweep then x needs to be incremented by half the stepsize (this is temporary, eventually the end position will be implemented in the fio)
+    sweeptype = command.split(' ')[0]
+    if sweeptype == 'fastsweep':
+        x = x + (x[1]-x[0])/2.
     y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
+
+    if every is not None:
+        if every == 0:
+            print('Using every second image, starting with the first')
+            x = x[0::2]
+            y = y[0::2]
+        elif every == 1:
+            print('Using every second image, starting with the second')
+            x = x[1::2]
+            y = y[1::2]
 
     print(x)
     print(y)
@@ -555,10 +568,6 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
         pars['line_intercept'].set(np.min(y))
 
     mod = lmod + gmod
-
-    #print(x, y)
-    #print(pars)
-
     result = mod.fit(y, pars, x=x)
     move = False
     if result.success:
@@ -612,11 +621,19 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
         #    plt.show()
         return {'cen': cen, 'fwhm': fwhm, 'moveto': move}
     else:
+        if show:
+            fig = plt.figure()
+            ax = plt.subplot(111)
+            ax.plot(y, x)
+            ax.set_xlabel(motor)
+            ax.set_ylabel('Intensity')
+            ax.set_title(scanFileName+'\n'+str(roi))
+            plt.show(block=True)
         raise ValueError('Fit did not work')
 
 
 def center(direction, start, end, NoSteps, rotstart, rotend,
-           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False):
+           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False, every=None):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
@@ -684,7 +701,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     positions = fiodata[mot]
     if DEBUG:
         print('Positions: %d' % len(positions))
-    res = fitGauss(scanFileName, roi, motor=mot)
+    res = fitGauss(scanFileName, roi, motor=mot, every=every)
     return positions, res, roi, scanFileName
 
 
@@ -796,7 +813,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     main_ax.get_yaxis().set_visible(False)
     th_ax = fig.add_subplot(grid[-1, 0])
     th_ax.set_xlabel('theta [pix]')
-    
+
     y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
 
     if maxint is None:
