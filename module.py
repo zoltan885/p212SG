@@ -654,7 +654,7 @@ class Grain(object):
 
 
         self.M.write_log('Logfile: %s' % fio)
-        self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
+        self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=True)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         print(res['moveto'])
         if res['moveto']:

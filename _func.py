@@ -502,7 +502,7 @@ def getIntensities(imsource, roi):
     return np.array(intensities)
 
 
-def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofitpos=True, every=None):
+def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofitpos=True, every=None, bgmod='const'):
     '''
     TODO this could simply return the results object and the center functions should take care of the moveto and displaying the results
     :param scanFileName: fio file of the scan to fit
@@ -513,7 +513,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
     :return:
     '''
     try:
-        from lmfit.models import GaussianModel, LinearModel
+        from lmfit.models import GaussianModel, LinearModel, ConstantModel
         from matplotlib.widgets import Button
     except:
         raise ImportError('gitGauss func: could not import...')
@@ -548,18 +548,25 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
     print(x)
     print(y)
 
+    if x[0] > x[-1]:
+        x = x[::-1]
+        y = y[::-1]
+
     gmod = GaussianModel(prefix='peak_')
-    lmod = LinearModel(prefix='line_')
+    if bgmod == 'line':
+        bgmod = LinearModel(prefix='line_')
+    elif bgmod == 'const':
+        bgmod = ConstantModel(prefix='const_')
 
     print(len(x), len(y))
 
     try:
         pars = gmod.guess(y, x=x)
-        pars += lmod.guess(y, x=x)
+        pars += bgmod.guess(y, x=x)
     except:
         print('Automatic parameter guess failed')
         pars = gmod.make_params()
-        pars += lmod.make_params()
+        pars += bgmod.make_params()
         # peak_center parameter is restricted to the data region
         pars['peak_center'].set(x[np.argmax(y)], min = np.min(x), max = np.max(x))
         pars['peak_amplitude'].set(np.max(y)-np.min(y))
@@ -567,7 +574,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
         pars['line_slope'].set((y[-1]-y[0])/(x[-1]-x[0]))
         pars['line_intercept'].set(np.min(y))
 
-    mod = lmod + gmod
+    mod = bgmod + gmod
     result = mod.fit(y, pars, x=x)
     move = False
     if result.success:
