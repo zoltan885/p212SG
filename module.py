@@ -295,11 +295,14 @@ class logger(object):
     logger class for grain attributes
     log the results into a json file
     '''
-
+    
     def __init__(self, fname):
         self.j = fname+'.json'
         self.y = fname+'.yml'
-        self.pickle_path = os.path.join(fname, 'objects')
+        self.use_pickle = False
+        if self.use_pickle:
+            self.pickle_path = os.path.join(fname.rpartition('/')[0], 'objects')
+            os.path.makedirs(self.pickle_path)
         #self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
         self.objList = {}  # dict holding the registered classes
 
@@ -331,9 +334,10 @@ class logger(object):
             json.dump(dumpDict, jf)
         with open(self.y, 'w') as yf:
             yaml.dump(dumpDict, yf)
-        for k,v in self.objList.items():
-            with open(os.path.join(self.pickle_path, k), 'wb') as pick:
-                pickle.dump(v, pick)
+        if self.use_pickle:  # the DevicrProxy is not picklable....
+            for k,v in self.objList.items():
+                with open(os.path.join(self.pickle_path, k), 'wb') as pick:
+                    pickle.dump(v, pick)
         return dumpDict
 
 
