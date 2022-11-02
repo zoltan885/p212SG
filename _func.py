@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Tue Mar 10 10:57:06 2020
@@ -610,6 +610,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
             ax.axvline(x=cen)
             ax.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
             ax.set_xlabel(motor)
+
             ax.set_ylabel('Intensity')
             ax.set_title(scanFileName+'\n'+str(roi))
             def moveto(self):
@@ -693,12 +694,12 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
 
-    supersweepCommand = 'supersweep %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
+    supersweepCommand = 'supersweep2 %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
     print(supersweepCommand)
     try:
         supersweepOut = HU.runMacro(supersweepCommand)
-    except:
-        return None
+    except Exception as e:
+        raise e
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
@@ -735,12 +736,12 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    sweepCommand = 'fastsweep idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
+    sweepCommand = 'fastsweep2 idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
     print(sweepCommand)
     try:
         sweepOut = HU.runMacro(sweepCommand)
-    except:
-        return None
+    except Exception as e:
+        raise e
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]

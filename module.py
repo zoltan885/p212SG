@@ -1,4 +1,4 @@
-#!/usr/bin/env python2
+#!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
 Created on Thu Mar  5 14:29:20 2020
@@ -36,6 +36,7 @@ from collections import OrderedDict
 import json
 import yaml
 import shutil
+import pickle
 
 
 SE = '\033[41m'
@@ -84,6 +85,7 @@ def _prepare_config_file(path):
         f.write('# auxiliary devices (e.g. slits) for logging (spock names separated by spaces):\n')
         f.write('aux: ')
 
+    print('Config file ready')
 
 
 
@@ -293,9 +295,11 @@ class logger(object):
     logger class for grain attributes
     log the results into a json file
     '''
+
     def __init__(self, fname):
         self.j = fname+'.json'
         self.y = fname+'.yml'
+        self.pickle_path = os.path.join(fname, 'objects')
         #self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
         self.objList = {}  # dict holding the registered classes
 
@@ -327,7 +331,13 @@ class logger(object):
             json.dump(dumpDict, jf)
         with open(self.y, 'w') as yf:
             yaml.dump(dumpDict, yf)
+        for k,v in self.objList.items():
+            with open(os.path.join(self.pickle_path, k), 'wb') as pick:
+                pickle.dump(v, pick)
         return dumpDict
+
+
+
 
 
 class TestGrain(object):
@@ -781,7 +791,13 @@ class Grain(object):
 
 
 
-
+def loadGrainFromPickle(pickle_file):
+    '''
+    returns the grain instance saved earlier into a pickle file
+    '''
+    with open(pickle_file, 'rb') as pf:
+        obj = pickle.load(pf)
+        return obj
 
 
 
