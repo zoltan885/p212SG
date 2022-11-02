@@ -610,6 +610,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
             ax.axvline(x=cen)
             ax.text(cen, y.min()+0.2*(y.max()-y.min()), 'center=%.3f\nFWHM=%.3f' % (cen, fwhm))
             ax.set_xlabel(motor)
+
             ax.set_ylabel('Intensity')
             ax.set_title(scanFileName+'\n'+str(roi))
             def moveto(self):
@@ -697,8 +698,8 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     print(supersweepCommand)
     try:
         supersweepOut = HU.runMacro(supersweepCommand)
-    except:
-        return None
+    except Exception as e:
+        raise e
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
@@ -739,8 +740,8 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
     print(sweepCommand)
     try:
         sweepOut = HU.runMacro(sweepCommand)
-    except:
-        return None
+    except Exception as e:
+        raise e
     time.sleep(0.1)
     fiodata, path, _ = _fioparser(scanFileName)
     path = path['%d' % channel]
