@@ -29,7 +29,7 @@ DEBUG = 1
 
 def _getMovableSpockNames():
     '''
-       gets the stepping_motor devices
+       gets the stepping_motor devices from the online.xml together with the host name
     '''
     try:
         import PyTango as PT, HasyUtils as HU
@@ -42,7 +42,10 @@ def _getMovableSpockNames():
         for rec in HU.getOnlineXML():
             # the phy_motion is type_tango
             if rec['type'].lower() == 'stepping_motor' or rec['type'].lower() == 'type_tango':
-                names[rec['name'].lower()] = rec['device'].lower()
+                host = rec['hostname'].lower()
+                device = rec['device'].lower()
+                names[rec['name'].lower()] = host + '/' + device
+                #names[rec['name'].lower()] = rec['device'].lower()
     except:
         pass
     return names
@@ -50,7 +53,7 @@ def _getMovableSpockNames():
 
 
 
-def _fioparser(fn=None, onlyexp=True):
+def _fioparser(fn=None, onlyexp=False):
     '''
     :param fn: fio file
     :param onlyexp: if true it only returns the exposure frames
@@ -110,31 +113,32 @@ def _fioparser(fn=None, onlyexp=True):
     savedir = {}
     for i in parameter:
         if 'filedir' in i.lower() or 'filepath' in i.lower() or 'downloaddirectory' in i.lower():
-            channelNo = int(i.lower().partition('_')[0][-1])
-            savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
-
-    return data, savedir, command
+            #channelNo = int(i.lower().partition('_')[0][-1])
+            #savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
+            savedir = i.split(' ')[3].strip("\"\",")  # TODO!
+            fullname = os.path.join(savedir, i.split(' ')[5].strip("\"\"}")) # TODO!
+    return data, savedir, fullname, command
 
 
 def imagesFromFio(fiofile, channel=1):
-    data, savedir, _ = _fioparser(fiofile)
+    data, savedir, fullname, _ = _fioparser(fiofile)
     # lambda or only one tif image
-    if len(set(data['filename'])) == 1:
-        channel=2   # TODO
-        files = savedir[str(channel)] + '/' + data['filename'][0]
-    else:
-        files = []
-        for t,fn in zip(data['type'], data['filename']):
-            # filter for exposure frames
-            if t == 'exposure':
-                ###########################################
-                #number = fn[:-4].rpartition('_')[2]
-                #while not number.isdigit():
-                #    number = number[1:]
-                #fn = fn.replace(str(number), '%05i'%(int(number)))
-                ###########################################
-                files.append(savedir[str(channel)] + fn)
-    return files
+#    if len(set(data['filename'])) == 1:
+#        channel=2   # TODO
+#        files = savedir[str(channel)] + '/' + data['filename'][0]
+#    else:
+#        files = []
+#        for t,fn in zip(data['type'], data['filename']):
+#            # filter for exposure frames
+#            if t == 'exposure':
+#                ###########################################
+#                #number = fn[:-4].rpartition('_')[2]
+#                #while not number.isdigit():
+#                #    number = number[1:]
+#                #fn = fn.replace(str(number), '%05i'%(int(number)))
+#                ###########################################
+#                files.append(savedir[str(channel)] + fn)
+    return fullname
 
 
 
@@ -169,7 +173,7 @@ def explorer(imsource, ROI=None):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir,_ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir,_,_ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
             il = imagesFromFio(imsource)
             print(il)
@@ -461,7 +465,7 @@ def getIntensities(imsource, roi):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir, _ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir, _, _ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
             il = imagesFromFio(imsource)
             print(il)
@@ -518,7 +522,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
     except:
         raise ImportError('gitGauss func: could not import...')
 
-    fiodata, path, command = _fioparser(scanFileName)
+    fiodata, path, _, command = _fioparser(scanFileName)
     ya = getIntensities(scanFileName, roi) # here we also read back every clearing frame from the beamline file system, not good
     # filtering for exposure frames
     if motor is None:
@@ -527,13 +531,15 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
             motor = 'idrz1(encoder)'
         if DEBUG:
             print('Motor determined from fio file as: %s', motor)
-    x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
+    #x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
+    x = np.array(fiodata[motor]) # only EIGER
     # one would need to know if this was a supersweep or a fastsweep
     # if it was a fastsweep then x needs to be incremented by half the stepsize (this is temporary, eventually the end position will be implemented in the fio)
     sweeptype = command.split(' ')[0]
     if sweeptype == 'fastsweep':
         x = x + (x[1]-x[0])/2.
-    y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
+    #y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
+    y = np.array(ya)  # only EIGER
 
     if every is not None:
         if every == 0:
@@ -694,15 +700,15 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
 
-    supersweepCommand = 'supersweep2 %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
+    supersweepCommand = 'supersweep2 %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f --unidir --noencs' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
     print(supersweepCommand)
     try:
         supersweepOut = HU.runMacro(supersweepCommand)
     except Exception as e:
         raise e
     time.sleep(0.1)
-    fiodata, path, _ = _fioparser(scanFileName)
-    path = path['%d' % channel]
+    fiodata, path, _,_ = _fioparser(scanFileName)
+    #path = path['%d' % channel]  # does not work with fastsweep2
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
@@ -713,7 +719,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     return positions, res, roi, scanFileName
 
 
-def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)', auto=False):
+def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(start)', auto=False):
     '''
     :param start:
     :param end:
@@ -736,15 +742,15 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    sweepCommand = 'fastsweep2 idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
+    sweepCommand = 'fastsweep2 idrz1 %.3f %.3f %d:%d/%.1f --noencs' % (start, end, channel, NoSteps, exposure)
     print(sweepCommand)
     try:
         sweepOut = HU.runMacro(sweepCommand)
     except Exception as e:
         raise e
     time.sleep(0.1)
-    fiodata, path, _ = _fioparser(scanFileName)
-    path = path['%d' % channel]
+    fiodata, path, _, _ = _fioparser(scanFileName)
+    #path = path['%d' % channel]  # not needed for the new version
 
     # get ROI:
     if roi is None:
@@ -791,7 +797,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     '''
     creates a map from an already existing measurement
     '''
-    d, savedir, _ = _fioparser(fiofile)
+    d, savedir, _, _ = _fioparser(fiofile)
     omega = np.array(d['idrz1(encoder)'])
     omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
 

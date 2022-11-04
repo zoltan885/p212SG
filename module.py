@@ -42,14 +42,17 @@ import pickle
 SE = '\033[41m'
 SI = '\033[44m'
 EE = '\033[0m'
-
+SM = '\033[35m'
 
 DEFEXPTIME = 0.5
 
-HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
-VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
-LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
+#HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
+#VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
+#LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 
+HORIZONTALBEAM = {'oh3st': 0.025, 'oh3sb': 0.025, 'oh3so': 0.15, 'oh3si': 0.15}
+VERTICALBEAM   = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.025, 'oh3si': 0.025}
+LARGEBEAM      = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.15, 'oh3si': 0.15}
 
 
 def lsenvironment():
@@ -71,22 +74,27 @@ def _prepare_config_file(path):
         f.write('# omega rotation motor\n')
         f.write('mot_rot: idrz1\n')
         f.write('# far field detector y motor\n')
-        f.write('mot_ff_det_hor: p2ty\n')
-        f.write('# far field detector z motor\n')
-        f.write('mot_ff_det_ver: p2tz\n')
+        f.write('mot_ff_det_hor: eigery\n')
+# there is no far field z in this experiment        
+#        f.write('# far field detector z motor\n')
+#        f.write('mot_ff_det_ver: p2tz\n')
+#
         f.write('# top slit\n')
-        f.write('mot_st: eh3st\n')
+        f.write('mot_st: oh3st\n')
         f.write('# bottom slit\n')
-        f.write('mot_sb: eh3sb\n')
+        f.write('mot_sb: oh3sb\n')
         f.write('# inboard slit\n')
-        f.write('mot_si: eh3si\n')
+        f.write('mot_si: oh3si\n')
         f.write('# outboard slit\n')
-        f.write('mot_so: eh3so\n')
+        f.write('mot_so: oh3so\n')
         f.write('# auxiliary devices (e.g. slits) for logging (spock names separated by spaces):\n')
         f.write('aux: ')
 
     print('Config file ready')
 
+
+def _getFullName(dev):
+    return dev.get_db_host().replace('.desy.de', '')+':10000/'+dev.dev_name()
 
 
 
@@ -122,7 +130,7 @@ class Measurement:
             self.create_directory()
         #self.temp_setup_detector_folders()
         self.create_logfile()
-
+        
         self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Lambda'}
 
         # make nested dict out of the device dict
@@ -130,6 +138,8 @@ class Measurement:
             self.devs_mov[k] = {'name': devices['movables'][k], 'dev': self.import_device(devices['movables'][k])}
         for k in devices['auxiliary'].keys():
             self.devs_aux[k] = {'name': devices['auxiliary'][k], 'dev': self.import_device(devices['auxiliary'][k])}
+        #print('Devs in init:')
+        #print(self.devs_mov)
         self.spock = get_ipython()
         print('Init finished')
 
@@ -173,8 +183,9 @@ class Measurement:
         dev_name is the instance name with full path or alternatively a local (same host!) spock name
         '''
         if '/' not in dev_name:
-            sn = _func._getMovableSpockNames()
-            dev_name = HU.getHostname()+':10000/'+sn[dev_name]
+            sn = _func._getMovableSpockNames()  # this gets now full device names with host name
+            #dev_name = HU.getHostname()+':10000/'+sn[dev_name]
+            dev_name = sn[dev_name]
         try:
             dev = PT.DeviceProxy(dev_name)
         except:
@@ -374,9 +385,21 @@ class Grain(object):
     '''
     Class to hold grain properties
     M - is the instance of the measurement class, defining the devices needed
+    
+    Methods:
+        current_pos
+        all_pos
+        goto_grain_center
+        centerH
+        centerV
+        centerO
+        recenter
+        recordMap
+        redef_ROI
+        showMap
     '''
 
-    def __init__(self, M, name=None, grdct=None):
+    def __init__(self, M, name, grdct=None):
         self.name=name
         self.M = M
         self.M.logger.register(self)
@@ -384,7 +407,7 @@ class Grain(object):
         self._zpos = [self.M.devs_mov['mot_ver']['dev'].position]
         self._rotpos = [self.M.devs_mov['mot_rot']['dev'].position]
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
-        self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
+        #self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
 
 
@@ -406,7 +429,7 @@ class Grain(object):
             self.fitpars = [{'?': '?'}]
             self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
             self.M.logger.logNow()
-
+        print('Grain object: %s defined.' % self.name)
 
         # self.roi  = None
         # self.Lroi = None
@@ -419,16 +442,20 @@ class Grain(object):
         # some magic to get the spock names of the moveable devices so that later they can be used by spock macros like mv
         self.moveable_spock_names = _func._getMovableSpockNames()
         self.inv_moveable_spock_names = {v: k for k, v in self.moveable_spock_names.items()}
-        self.mot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_hor']['dev'].dev_name()]
-        self.mot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ver']['dev'].dev_name()]
-        self.mot_rot = self.inv_moveable_spock_names[self.M.devs_mov['mot_rot']['dev'].dev_name()]
-        self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
-        self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
+        #print(self.inv_moveable_spock_names)
+        self.mot_hor = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_hor']['dev'])]
+        #self.mot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ver']['dev'].dev_name()]
+        self.mot_ver = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_ver']['dev'])]
+        #self.mot_rot = self.inv_moveable_spock_names[self.M.devs_mov['mot_rot']['dev'].dev_name()]
+        self.mot_rot = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_rot']['dev'])]
+        #self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
+        self.detmot_hor = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_ff_det_hor']['dev'])]
+        #self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
 
         self.M.write_log('"%s" grain object defined with positions:' % (self.name), nonl=True)
         self.M.log_positions(addtime=False)
 
-        if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor, self.detmot_ver)
+        if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor)#, self.detmot_ver)
         self.spock = get_ipython()
 
     def _appendPos(self):
@@ -438,8 +465,8 @@ class Grain(object):
         dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
               'z': self.M.devs_mov['mot_ver']['dev'].position,
               'o': self.M.devs_mov['mot_rot']['dev'].position,
-              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
-              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position}
+              #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
         self.positions.append(dct)
 
     def _appendSlitPos(self):
@@ -501,11 +528,17 @@ class Grain(object):
     # def current_pos(self):
     #     return [self._ypos[-1], self._zpos[-1], self._rotpos[-1], self._dethpos[-1], self._detvpos[-1]]
     def current_pos(self):
+        '''
+        the last position of the grain (not the current motor positions)
+        '''
         return self.positions[-1]
 
     # def all_pos(self):
     #     return [self._ypos, self._zpos, self._rotpos, self._dethpos, self._detvpos]
     def all_pos(self):
+        '''
+        shows all positions (i.e. a new position is added with each new centering)
+        '''
         return self.positions
 
 
@@ -529,6 +562,10 @@ class Grain(object):
     #                       self.mot_ver, self.current_pos()[1],
     #                       self.mot_rot, self.current_pos()[2]))
     def goto_grain_center(self, farDet=False, careful=True):
+        '''
+        go to current position of the grain
+        drives the 'y', 'z', 'o', and 'det_y' motors
+        '''
         cp = self.current_pos()
         command = 'umv %s %f %s %f %s %f' % (self.mot_hor, cp['y'], self.mot_ver, cp['z'], self.mot_rot, cp['o'])
         if farDet:
@@ -539,13 +576,16 @@ class Grain(object):
             dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
               'z': self.M.devs_mov['mot_ver']['dev'].position,
               'o': self.M.devs_mov['mot_rot']['dev'].position,
-              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
-              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,}
+              #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
             print('Moving from: %s' % dct)
         self.spock.magic(command)
 
 
     def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
+        '''
+        horizontal centering scan using supersweep2
+        '''
         if channel == 1:
             self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
         if channel == 2:
@@ -596,6 +636,9 @@ class Grain(object):
 
 
     def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
+        '''
+        vertical centering scan using supersweep2
+        '''
         if channel == 1:
             self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
         if channel == 2:
@@ -645,6 +688,9 @@ class Grain(object):
         #self.new_pos()
 
     def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=2, auto=False, mode=24, log=True):
+        '''
+        angular centering scan using fastsweep2
+        '''
         if channel == 1:
             self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
         if channel == 2:
