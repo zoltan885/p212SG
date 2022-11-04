@@ -29,23 +29,26 @@ DEBUG = 1
 
 def _getMovableSpockNames():
     '''
-       gets the stepping_motor devices
+       gets the stepping_motor devices from the online.xml together with the host name
     '''
     try:
         import PyTango as PT, HasyUtils as HU
     except(ImportError):
         print('Could not import modules PyTango and HasyUtils')
         return -1
-
     names=dict()
     try:
         for rec in HU.getOnlineXML():
             # the phy_motion is type_tango
             if rec['type'].lower() == 'stepping_motor' or rec['type'].lower() == 'type_tango':
-                names[rec['name'].lower()] = rec['device'].lower()
+                host = rec['hostname'].lower()
+                device = rec['device'].lower()
+                names[rec['name'].lower()] = host + '/' + device
+                #names[rec['name'].lower()] = rec['device'].lower()
     except:
         pass
     return names
+
 
 
 

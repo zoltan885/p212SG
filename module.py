@@ -45,10 +45,14 @@ EE = '\033[0m'
 
 DEFEXPTIME = 0.5
 
-HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
-VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
-LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
+#HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
+#VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
+#LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 
+
+HORIZONTALBEAM = {'oh3st': 0.025, 'oh3sb': 0.025, 'oh3so': 0.15, 'oh3si': 0.15}
+VERTICALBEAM   = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.025, 'oh3si': 0.025}
+LARGEBEAM      = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.15, 'oh3si': 0.15}
 
 
 def lsenvironment():
@@ -85,7 +89,8 @@ def _prepare_config_file(path):
         f.write('aux: ')
 
 
-
+def _getFullName(dev):
+    return dev.get_db_host().replace('.desy.de', '')+':10000/'+dev.dev_name()
 
 
 
@@ -172,7 +177,8 @@ class Measurement:
         '''
         if '/' not in dev_name:
             sn = _func._getMovableSpockNames()
-            dev_name = HU.getHostname()+':10000/'+sn[dev_name]
+#            dev_name = HU.getHostname()+':10000/'+sn[dev_name]
+            dev_name = sn[dev_name]
         try:
             dev = PT.DeviceProxy(dev_name)
         except:
@@ -370,7 +376,7 @@ class Grain(object):
         self._zpos = [self.M.devs_mov['mot_ver']['dev'].position]
         self._rotpos = [self.M.devs_mov['mot_rot']['dev'].position]
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
-        self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
+        #self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
 
 
@@ -405,16 +411,20 @@ class Grain(object):
         # some magic to get the spock names of the moveable devices so that later they can be used by spock macros like mv
         self.moveable_spock_names = _func._getMovableSpockNames()
         self.inv_moveable_spock_names = {v: k for k, v in self.moveable_spock_names.items()}
-        self.mot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_hor']['dev'].dev_name()]
-        self.mot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ver']['dev'].dev_name()]
-        self.mot_rot = self.inv_moveable_spock_names[self.M.devs_mov['mot_rot']['dev'].dev_name()]
-        self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
-        self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
+        self.mot_hor = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_hor']['dev'])]
+        #self.mot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ver']['dev'].dev_name()]
+        self.mot_ver = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_ver']['dev'])]
+        #self.mot_rot = self.inv_moveable_spock_names[self.M.devs_mov['mot_rot']['dev'].dev_name()]
+        self.mot_rot = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_rot']['dev'])]
+        #self.detmot_hor = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_hor']['dev'].dev_name()]
+        self.detmot_hor = self.inv_moveable_spock_names[_getFullName(self.M.devs_mov['mot_ff_det_hor']['dev'])]
+        #self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
+        #self.detmot_ver = self.inv_moveable_spock_names[self.M.devs_mov['mot_ff_det_ver']['dev'].dev_name()]
 
         self.M.write_log('"%s" grain object defined with positions:' % (self.name), nonl=True)
         self.M.log_positions(addtime=False)
 
-        if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor, self.detmot_ver)
+        if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor)
         self.spock = get_ipython()
 
     def _appendPos(self):
@@ -424,8 +434,8 @@ class Grain(object):
         dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
               'z': self.M.devs_mov['mot_ver']['dev'].position,
               'o': self.M.devs_mov['mot_rot']['dev'].position,
-              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
-              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,}
+              #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
         self.positions.append(dct)
 
     def _appendSlitPos(self):
@@ -525,8 +535,8 @@ class Grain(object):
             dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
               'z': self.M.devs_mov['mot_ver']['dev'].position,
               'o': self.M.devs_mov['mot_rot']['dev'].position,
-              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
-              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,}
+              #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
             print('Moving from: %s' % dct)
         self.spock.magic(command)
 
@@ -711,9 +721,10 @@ class Grain(object):
         if exposure is None:
             raise ValueError('Exposure time not given')
         self.M.set_slit_size(LARGEBEAM)
-        self.M.Lambda.StopAcq()
-        time.sleep(0.1)
-        self.M.Lambda.SaveAllImages = True
+        if channel == 3:
+            self.M.Lambda.StopAcq()
+            time.sleep(0.1)
+            self.M.Lambda.SaveAllImages = True
 
         positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure,
                                                                      channel=channel, roi=self.cROIs[str(channel)])
