@@ -12,8 +12,8 @@ mot_ver: idtz2
 # omega rotation motor
 mot_rot: idrz1
 # far field detector y motor
-ff_det_mot_hor: phymo_portal2_y
+ff_det_mot_hor: eigery
 # far field detector z motor
-ff_det_mot_ver: phymo_portal2_z
+ff_det_mot_ver: eigerz
 # auxiliary devices (e.g. slits) for logging (spock names separated by spaces):
 aux: eh3st eh3sb eh3so eh3si

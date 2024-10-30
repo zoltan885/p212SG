@@ -11,7 +11,7 @@ Created on Thu Mar  5 14:29:20 2020
 # sys.path.append('/home/p212user/sardanaMacros/sg') # <-- path to directory containing the import modules
 
 
-
+TEST = False
 DEBUG = True
 
 try:
@@ -19,7 +19,9 @@ try:
     import HasyUtils as HU
 except ImportError:
     print('Could not import PyTango & HasyUtils')
-import sys, os
+import sys
+import os
+import shutil
 
 import numpy as np
 import matplotlib.pyplot as plt
@@ -30,12 +32,13 @@ import time
 from PIL import Image
 
 import _func
+from importlib import reload
+reload(_func)
 from matplotlib.backends.backend_pdf import PdfPages
 
 from collections import OrderedDict
 import json
 import yaml
-import shutil
 
 
 SE = '\033[41m'
@@ -45,15 +48,20 @@ EE = '\033[0m'
 
 DEFEXPTIME = 0.5
 
-#HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
-#VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
-#LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
+HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
+VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
+LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 
 
-HORIZONTALBEAM = {'oh3st': 0.025, 'oh3sb': 0.025, 'oh3so': 0.15, 'oh3si': 0.15}
-VERTICALBEAM   = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.025, 'oh3si': 0.025}
-LARGEBEAM      = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.15, 'oh3si': 0.15}
+#HORIZONTALBEAM = {'oh3st': 0.025, 'oh3sb': 0.025, 'oh3so': 0.15, 'oh3si': 0.15}
+#VERTICALBEAM   = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.025, 'oh3si': 0.025}
+#LARGEBEAM      = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.15, 'oh3si': 0.15}
+FOCUSEDBEAM    = {'eh3st': 0.015, 'eh3sb': 0.02, 'eh3so': 0.05, 'eh3si': 0.05}
 
+
+EIGERCH = 2
+VAREXCLOSECH = 3
+VAREXMIDCH = 4
 
 def lsenvironment():
     ip = get_ipython() # this only works from Ipython, where get_ipython is in the global namespace
@@ -74,9 +82,9 @@ def _prepare_config_file(path):
         f.write('# omega rotation motor\n')
         f.write('mot_rot: idrz1\n')
         f.write('# far field detector y motor\n')
-        f.write('mot_ff_det_hor: p2ty\n')
+        f.write('mot_ff_det_hor: eigery\n')
         f.write('# far field detector z motor\n')
-        f.write('mot_ff_det_ver: p2tz\n')
+        f.write('mot_ff_det_ver: eigerz\n')
         f.write('# top slit\n')
         f.write('mot_st: eh3st\n')
         f.write('# bottom slit\n')
@@ -91,6 +99,8 @@ def _prepare_config_file(path):
 
 def _getFullName(dev):
     return dev.get_db_host().replace('.desy.de', '')+':10000/'+dev.dev_name()
+
+
 
 
 
@@ -126,7 +136,7 @@ class Measurement:
         #self.temp_setup_detector_folders()
         self.create_logfile()
 
-        self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Lambda'}
+        self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Varex3', '4': 'Varex4'}
 
         # make nested dict out of the device dict
         for k in devices['movables'].keys():
@@ -194,8 +204,13 @@ class Measurement:
         return dev
 
 
-    def create_directory(self):
+    def create_directory(self):  
         if os.path.exists(self.measurement_path):
+            if TEST:
+                shutil.rmtree(self.measurement_path)
+                while os.path.exists(self.measurement_path):
+                    time.sleep(0.1)
+                print('Removed test dir')
             print(SE+'Directory exists! Please use load=True option when initializing the measurement.'+EE)
             print('Object not instantiated')
             raise ValueError
@@ -286,8 +301,10 @@ class Measurement:
         c = 'umv '
         for m,p in posdict.items():
             c = c + ('%s %.3f ' %(m,p))
-        self.spock.magic(c)
+        #self.spock.magic(c)
+        _ = HU.runMacro(c)
         self.write_log('Slits set to: %s' % posdict)
+
 
 '''
 general class for grain Candidates
@@ -367,17 +384,26 @@ class Grain(object):
     Class to hold grain properties
     M - is the instance of the measurement class, defining the devices needed
     '''
-
-    def __init__(self, M, name=None, grdct=None):
+    all_instances = {}
+    
+    def __init__(self, M, name=None, grdct=None, overwrite=False):
         self.name=name
+        # keeping track of the instances
+        if self.name in list(Grain.all_instances.keys()):
+            if not overwrite:
+                print(SE+'Grain object with such a name already exists\nPlease use a distinct name, or set the overwrite flag to true'+EE)
+            elif overwrite:
+                Grain.all_instances[self.name] = self
+                print(SE+'Grain object overwritten'+EE)
+        else:
+            Grain.all_instances[self.name] = self
         self.M = M
         self.M.logger.register(self)
         self._ypos = [self.M.devs_mov['mot_hor']['dev'].position]
         self._zpos = [self.M.devs_mov['mot_ver']['dev'].position]
         self._rotpos = [self.M.devs_mov['mot_rot']['dev'].position]
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
-        #self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
-
+        self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
 
         if grdct is not None:
@@ -538,41 +564,51 @@ class Grain(object):
               'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,}
               #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
             print('Moving from: %s' % dct)
-        self.spock.magic(command)
+        _ = HU.runMacro(command)
+        #self.spock.magic(command)
 
 
-    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
+    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=None, auto=False, log=True, focus=False):
+        assert channel in [2,3,4], 'Wrong channel'
         if channel == 1:
+            #self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
+            self.M.write_log('wrong channel')
+        if channel == VAREXMIDCH:
+            #self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
             self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
-        if channel == 2:
+        if channel == EIGERCH:
+            #self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
             self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
-        if channel == 3:
-            self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
         # move slits:
-        self.M.set_slit_size(VERTICALBEAM)
+        if focus:
+            self.M.set_slit_size(FOCUSEDBEAM)
+        else:
+            self.M.set_slit_size(VERTICALBEAM)
 
-        if channel == 3:
+        if channel == 5:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == 2:
-            self.spock.magic('_eigerLive off')
+        elif channel == EIGERCH:
+            _ = HU.runMacro('eigerLive off')
+            #self.spock.magic('eigerLive off')
         elif channel == 1:
             pass
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
-                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)], every=None)
-
-
+                                                                exposure=exposure, channel=channel,
+                                                                roi=self.cROIs[str(channel)], every=None)
+        
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
-            self.spock.magic('umv idty2 %.3f' % res['cen'])
-
+            #self.spock.magic('umv idty2 %.3f' % res['cen'])
+            _ = HU.runMacro('umv idty2 %.3f' % res['cen'])
         if auto:
-            self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
+            #self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
+            _ = HU.runMacro('umv %s %f'%(self.mot_hor, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
         if log:
@@ -591,38 +627,48 @@ class Grain(object):
         #self.new_pos()
 
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True):
+    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True, focus=False):
+        assert channel in [2,3,4], 'Wrong channel'
         if channel == 1:
+            #self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
+            self.M.write_log('Wrong channel')
+        if channel == VAREXMIDCH:
+            #self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
             self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
-        if channel == 2:
+        if channel == EIGERCH:
+            #self.M.write_log('Vertical centering with Lambda on grain: %s' % self.name)
             self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
-        if channel == 3:
-            self.M.write_log('Vertical centering with Lambda on grain: %s' % self.name)
         # move slits:
-        self.M.set_slit_size(HORIZONTALBEAM)
+        if focus:
+            self.M.set_slit_size(FOCUSEDBEAM)
+        else:
+            self.M.set_slit_size(HORIZONTALBEAM)
 
-        if channel == 3:
+        if channel == 5:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == 2:
-            self.spock.magic('_eigerLive off')
+        elif channel == EIGERCH:
+            #self.spock.magic('eigerLive off')
+            _ = HU.runMacro('eigerLive off')
         elif channel == 1:
             pass
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.center('v', start, end, NoSteps+1, rotstart, rotend,
-                                                                exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
+                                                                exposure=exposure, channel=channel,
+                                                                roi=self.cROIs[str(channel)], every=None)
 
 
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         if res['moveto']:
-            self.spock.magic('umv idtz2 %.3f' % res['cen'])
-
+            #self.spock.magic('umv idtz2 %.3f' % res['cen'])
+            _ = HU.runMacro('umv idtz2 %.3f' % res['cen'])
         if auto:
-            self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
+            #self.spock.magic('umv %s %f'%(self.mot_hor, res['cen']))
+            _ = HU.runMacro('umv %s %f'%(self.mot_hor, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
         if log:
@@ -640,27 +686,35 @@ class Grain(object):
 
         #self.new_pos()
 
-    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=2, auto=False, mode=24, log=True):
+    def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=None, auto=False, mode=24, log=True, focus=False, fit=True):
+        assert channel in [2,3,4], 'Wrong channel'
         if channel == 1:
+            #self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
+            self.M.write_log('Wrong channel')
+        if channel == VAREXMIDCH:
+            #self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
             self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
-        if channel == 2:
+        if channel == EIGERCH:
+            #self.M.write_log('Angular centering with Lambda on grain: %s' % self.name)
             self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
-        if channel == 3:
-            self.M.write_log('Angular centering with Lambda on grain: %s' % self.name)
         # move slits:
-        self.M.set_slit_size(LARGEBEAM)
+        if focus:
+            self.M.set_slit_size(FOCUSEDBEAM)
+        else:
+            self.M.set_slit_size(LARGEBEAM)
 
-        if channel == 3:
+        if channel == 5:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == 2:
-            self.spock.magic('_eigerLive off')
+        elif channel == EIGERCH:
+            #self.spock.magic('eigerLive off')
+            _ = HU.runMacro('eigerLive off')
         elif channel == 1:
             pass
         time.sleep(0.1)
 
-        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[str(channel)])
+        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[str(channel)], fit=fit)
 
 
         self.M.write_log('Logfile: %s' % fio)
@@ -668,10 +722,11 @@ class Grain(object):
         self.M.write_log('Results: center %f fwhm %f' % (res['cen'], res['fwhm']))
         print(res['moveto'])
         if res['moveto']:
-            self.spock.magic('umv idrz1 %.3f' % res['cen'])
-
+            #self.spock.magic('umv idrz1 %.3f' % res['cen'])
+            _ = HU.runMacro('umv idrz1 %.3f' % res['cen'])
         if auto:
-            self.spock.magic('umv %s %f'%(self.mot_rot, res['cen']))
+            #self.spock.magic('umv %s %f'%(self.mot_rot, res['cen']))
+            _ = HU.runMacro('umv %s %f'%(self.mot_rot, res['cen']))
             self.M.write_log('Automatically moved to the center.')
 
         if logger is not None:
@@ -689,13 +744,14 @@ class Grain(object):
 
         #self.new_pos()
 
-    def recenter(self, imsource=None, channel=2, every=None):
+    def recenter(self, imsource=None, channel=None, every=None):
         if imsource is not None:
             if False:  # testing
                 ROI,_ = _func.explorer(imsource, ROI=None)
                 res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False)
                 return
-            self.cROIs[str(channel)], _ = _func.explorer(imsource, ROI=None)
+            if self.cROIs[str(channel)] is None:
+                self.cROIs[str(channel)], _ = _func.explorer(imsource, ROI=None)
             self.M.write_log('%s roi redefined: %s for grain %s' % (self.M.detChannels[str(channel)], str(self.cROIs[str(channel)]), self.name))
         else:
             print(SE+'No image source defined!'+EE)
@@ -717,24 +773,32 @@ class Grain(object):
             self.M.logger.logNow()
 
 
-    def recordMap(self, start, end, NoSteps, exposure=None, channel=2):
+    def recordMap(self, start, end, NoSteps, exposure, channel=2, showFig=True, fit=False, fish=11):
         if exposure is None:
             raise ValueError('Exposure time not given')
         self.M.set_slit_size(LARGEBEAM)
-        if channel == 3:
+        if channel == 5:
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
 
-        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure,
-                                                                     channel=channel, roi=self.cROIs[str(channel)])
+        _func.recordMap2(start, end, NoSteps, exposure=exposure, channel=channel)
+
+#        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, 
+#                                   end,
+#                                   NoSteps, 
+#                                   exposure=exposure, 
+#                                   channel=channel, 
+#                                   roi=self.cROIs[str(channel)], 
+#                                   showFig=showFig,)
+#                                   #fit=False)
         # if not self.Lroi:
         #     positions, res, self.Lroi, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
         # else:
         #     positions, res, _, fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.Lroi)
 
         if logger is not None:
-            self._appendPos()
+            #self._appendPos()
             self.timestamp.append(time.asctime())
             self.action.append('recordMap')
             self.direction.append('?')
@@ -747,8 +811,13 @@ class Grain(object):
             self.M.logger.logNow()
 
 
+    def recordMapRelative(self, span, noSteps, exposure=None, channel=2):
+        currentOmega = self.M.devs_mov['mot_rot']['dev'].position
+        self.recordMap(currentOmega-span/2, currentOmega+span/2, noSteps, exposure=exposure, channel=channel)
 
-    def redef_ROI(self, imsource=None, channel=2):
+
+
+    def redef_ROI(self, imsource=None, channel=None):
         '''
         TODO: this should watch out if the right channel is given,
         currently it can not, because the explorer does not report which detector it used
@@ -791,9 +860,110 @@ class Grain(object):
 
 
 
+    def fatigue(self, chstart, chend, cycles, bunches, logf, speed=10):
+        _func.fatigue(chstart, chend, cycles, bunches, logf, speed=speed)
+        
+        
+        
+    def record_load_cycle(self, start, end, steps, exp, logfile, posfile):
+        assert os.path.exists(posfile), f'{posfile} no such file'
+        idty2pos = []
+        content = None
+        with open(posfile, 'r') as p:
+            content = p.readlines()
+        positions = content
+        if ' ' in positions[0]:
+            chps = [float(a.split(' ')[0]) for a in positions]
+            idty2pos = [float(a.split(' ')[1])/1000 for a in positions]
+        else:
+            chps = [float(p) for p in positions]
+        print(f'Crosshead positions: {chps}')
+        if idty2pos != []:
+            print(f'idty2 positions: {idty2pos}')
+    
+        # Counter dictionary
+        counters = {}
+        counters['crosshead'] = PT.AttributeProxy('hasep21eh3:10000/p21/motor/eh3_u4.15/Position')
+        counters['idty2'] = PT.AttributeProxy('hasep21eh3:10000/p21/motor/eh3_u1.05/Position')
+        counters['loadcell'] = PT.AttributeProxy('hasep21eh3:10000/p21/keithley2602b/eh3_1.01/MeasVoltage')
+        counters['load'] = PT.AttributeProxy('hasep21eh3:10000/p21/VcExecutor/load/counts')
+        counters['strg1'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff/card3/channel1')
+        counters['strg2'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff/card4/channel1')
+    
+        crosshead = PT.DeviceProxy('hasep21eh3:10000/p21/motor/eh3_u4.15')
+        chspeed = crosshead.slewRate / 266.5
+    
+        directory = logfile.rpartition('/')[0]
+        if not os.path.isabs(directory):
+            directory = os.path.join('/gpfs/current/raw', directory)
+        if not os.path.exists(directory):
+            try:
+                os.makedirs(directory)
+            except:
+                print('Can not create directories')
+                return 1
+        print('Directories ready')
+        logfile = os.path.join(directory, logfile.rpartition('/')[2] + '.log')
+    
+        with open(logfile, 'a') as log:
+            log.write('# %s\n' % time.asctime())
+            log.write('# crosshead speed: %.2f um/s\n' % chspeed)
+            log.write('# strg1 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff/card3').ScaleFactor)
+            log.write('# strg2 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff/card4').ScaleFactor)
+            log.write('# timestamp ')
+            for kk in list(counters.keys()):
+                log.write('%s ' % kk)
+            log.write('grain ScanID\n')
+        
+        def write_log_line(self):
+            with open(logfile, 'a') as log:
+                try:
+                    log.write('%.1f  ' % (time.time()))
+                    for k,v in counters.items():
+                        log.write('%.4e ' % v.read().value)
+    
+                    log.write('%s %d' % (self.name, HU.getEnv('ScanID')))
+                    log.write('\n')
+                    log.flush()
+                except:
+                    print('Exception writing logfile')
+        
+        # RUN
+        for i,chp in enumerate(chps):
+            #print(f'Would move crosshead to {chp}')
+            _ = HU.runMacro('umv crosshead %.1f' % chp)
+            if idty2pos != []:
+                #self.warning(f'Would correct idty2 with {self.idty2pos[i]}')
+                _ = HU.runMacro('umvr idty2 %.4f' % idty2pos[i])
+            self.recordMap(start, end, steps, exposure=exp, channel=2, showFig=False, fit=False)
+            write_log_line(self)
 
 
+    def measure_fatigue_cycles(self, Ostart, Oend, Osteps, exp, singleCycleLog, posfile, fatCycles, fatBunches, fatLogf, fatSpeed):
+        logf = singleCycleLog + '_000'
+        self.record_load_cycle(Ostart, Oend, Osteps, exp, logf, posfile)
+    
+        
+        assert os.path.exists(posfile), f'{posfile} no such file'
+        content = None
+        with open(posfile, 'r') as p:
+            content = p.readlines()
+        positions = content
+        if ' ' in positions[0]:
+            chps = [float(a.split(' ')[0]) for a in positions]
+        else:
+            chps = [float(p) for p in positions]
+        
+        chpsMin = min(chps)
+        chpsMax = max(chps)
+        
+        for b in range(fatBunches):
+            self.fatigue(chpsMin, chpsMax, fatCycles, 1, fatLogf, speed=fatSpeed)
+            logf = singleCycleLog + '_%03d' % (b+1)
+            _func.set_crosshead_speed(10)
+            self.record_load_cycle(Ostart, Oend, Osteps, exp, logf, posfile)
 
+        
 
 
 

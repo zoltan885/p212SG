@@ -15,6 +15,8 @@ from matplotlib.patches import Rectangle
 import dateutil
 import os, time
 import fabio
+import glob
+import traceback
 
 try:
     import PyTango as PT
@@ -50,10 +52,57 @@ def _getMovableSpockNames():
     return names
 
 
+# partly from HasyUtils
+def runMacroDoor(macroString, retry=5, sweep=False):
+    lst = macroString.split()
+    door = None
+    for i in range(retry):
+        try:
+            door = PT.DeviceProxy('hasep21eh3:10000/p21/door/hasep21eh3.01')
+            break
+        except: 
+            print("%ith try: No door!" % i)
+            time.sleep(0.1)
+    assert door is not None, 'No door!'
+    while door.state() != PT.DevState.ON:
+        time.sleep(0.1)
+    try:
+        door.runMacro(lst)
+    except Exception as e:
+        if sweep:
+            while door.state() != PT.DevState.ON:
+                time.sleep(0.1)
+            door.runMacro(['restoreSweepCrash'])   # does this return immediately? IN that case there is no exception here to catch
+        traceback.print_exc()
+        time.sleep(0.1)
+    while door.state() is PT.DevState.RUNNING:
+        time.sleep( 0.1)
+    return door.output
 
 
+def runMacro(macro, retry=True, sweep=False):
+    if retry:
+        tries = 5
+    else:
+        tries = 1
+    door = PT.DeviceProxy('hasep21eh3:10000/p21/door/hasep21eh3.01')
+    for i in range(tries):
+        while door.state() != PT.DevState.ON:
+                time.sleep(0.1)
+        try:
+            out = HU.runMacro(macro)
+            return out
+        except Exception as e:
+            if sweep:
+                try:
+                    _ = HU.runMacro('restoreSweepCrash')
+                except:
+                    pass
+            traceback.print_exc()
+            time.sleep(0.1)
 
-def _fioparser(fn=None, onlyexp=True):
+
+def _fioparser(fn=None, onlyexp=False):
     '''
     :param fn: fio file
     :param onlyexp: if true it only returns the exposure frames
@@ -111,33 +160,55 @@ def _fioparser(fn=None, onlyexp=True):
     date = dateutil.parser.parse(' '.join(comment[1].split(' ')[5:]))
     # get filedirs:
     savedir = {}
-    for i in parameter:
-        if 'filedir' in i.lower() or 'filepath' in i.lower() or 'downloaddirectory' in i.lower():
-            channelNo = int(i.lower().partition('_')[0][-1])
-            savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
+    if command.split()[0] in ['fastsweep', 'supersweep']:
+        for i in parameter:
+            if 'filedir' in i.lower() or 'filepath' in i.lower() or 'downloaddirectory' in i.lower():
+                channelNo = int(i.lower().partition('_')[0][-1])
+                savedir['%d' % channelNo] = i.rpartition(' = ')[2].replace('\\', '/').replace('t:/', '/gpfs/').replace('/ramdisk/', '/gpfs/')
+    # this is  crap here
+    elif command.split()[0] in ['fastsweep2', 'supersweep2']:
+        for cc in command.split():
+            if ':' in cc:
+                channelNo = int(cc.partition(":")[0])
+        print('Channel: %i' % channelNo)
+        for i in parameter:
+            if "\"filedir\":" in i.lower():
+                for ii in i.split():
+                    if "/" in ii:
+                        savedir[str(channelNo)] = ii.strip(",").strip("\"")
+        if channelNo in [3,4]:
+            data['filename'] = sorted(glob.glob(os.path.join(savedir[str(channelNo)], '*.cbf')), key = os.path.getmtime)
+            data['type'] = ['exposure' for f in data['filename']]
+        elif channelNo == 2:
+            data['filename'] = glob.glob(os.path.join(savedir[str(channelNo)], '*_data_*.h5'))
+    return data, savedir, command, channelNo
 
-    return data, savedir, command
 
-
-def imagesFromFio(fiofile, channel=1):
-    data, savedir, _ = _fioparser(fiofile)
-    # lambda or only one tif image
-    if len(set(data['filename'])) == 1:
-        channel=2   # TODO
-        files = savedir[str(channel)] + '/' + data['filename'][0]
-    else:
-        files = []
-        for t,fn in zip(data['type'], data['filename']):
-            # filter for exposure frames
-            if t == 'exposure':
-                ###########################################
-                #number = fn[:-4].rpartition('_')[2]
-                #while not number.isdigit():
-                #    number = number[1:]
-                #fn = fn.replace(str(number), '%05i'%(int(number)))
-                ###########################################
-                files.append(savedir[str(channel)] + fn)
-    return files
+def imagesFromFio(fiofile, channel=None):
+    data, savedir, _, _ = _fioparser(fiofile)
+    return data['filename']
+#    if channel == 2:  # ugly fix for resurfacing fastsweep issue
+#        savedirl = savedir['2'].split('/')
+#        savedirl[-3] = str(int(savedirl[-3])+1)
+#        savedir['2'] = '/'.join(savedirl)
+#    
+#    # lambda or only one tif image
+#    if len(set(data['filename'])) == 1:
+#        channel=3   # TODO
+#        files = savedir[str(channel)] + '/' + data['filename'][0]
+#    else:
+#        files = []
+#        for t,fn in zip(data['type'], data['filename']):
+#            # filter for exposure frames
+#            if t == 'exposure':
+#                ###########################################
+#                #number = fn[:-4].rpartition('_')[2]
+#                #while not number.isdigit():
+#                #    number = number[1:]
+#                #fn = fn.replace(str(number), '%05i'%(int(number)))
+#                ###########################################
+#                files.append(savedir[str(channel)] + fn)
+#    return files
 
 
 
@@ -153,6 +224,7 @@ def explorer(imsource, ROI=None):
     """
     function for initial grain hunt
     shows the list of images with a slider to inspect them individually
+    if fio, it gets the channel from the _fioparser
 
     TODO:
         could work with keyboard
@@ -160,10 +232,11 @@ def explorer(imsource, ROI=None):
     import matplotlib.pyplot as plt
     from matplotlib.widgets import Slider, Button, RadioButtons
 
-    tif,nxs,fio,h5 = False,False,False,False
+    tif,cbf,nxs,fio,h5 = False,False,False,False,False
     if isinstance(imsource, list):
         imageList = imsource
         tif = True
+        print('tif here')
         if DEBUG: print('List of tif files')
     elif isinstance(imsource, str):
         if imsource.endswith('nxs'):
@@ -172,20 +245,25 @@ def explorer(imsource, ROI=None):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir,_ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir, command, channel = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
-            il = imagesFromFio(imsource)
+            #il = imagesFromFio(imsource, channel=channel)
+            il = fiodata['filename']
             print(il)
-            if isinstance(il, str):
-                if il.endswith('nxs'):
-                    data = getDataNXSLambda(il)
-                    nxs = True
-                elif il.endswith('.h5'):
-                    data = getEigerDataset(il)
-                    h5 = True
-            elif isinstance(il, list):
-                imageList = il
-                tif = True
+            if isinstance(il, list):
+                if len(il) == 1:
+                    il = il[0]
+                    if il.endswith('nxs'):
+                        data = getDataNXSLambda(il)
+                        nxs = True
+                    elif il.endswith('.h5'):
+                        data = getEigerDataset(il)
+                        print('Getting Eiger dataset')
+                        h5 = True
+                elif len(il) > 1:
+                    imageList = il
+                    tif = True
+                    print('tif second')
         elif imsource.endswith('.h5'):
             data = getEigerDataset(imsource)
             if DEBUG: print('Eiger file')
@@ -205,15 +283,17 @@ def explorer(imsource, ROI=None):
     # get image positions if the source is a fio file
     positions = None
     if fio:
-        # fastsweep:
-        if len(fiodata.keys()) == 6:
-            positions = fiodata['idrz1(encoder)']
-            positions += (positions[1]-positions[0])/2
-        # supersweep
-        elif len(fiodata.keys()) == 7:
-            for k in fiodata.keys():
-                if k not in ['idrz1(encoder)', 'type', 'filename', 'end pos', 'unix time', 'channel']:
-                    positions = fiodata[k]
+        # fastsweep2:
+        if command.split()[0] in ['fastsweep2']:
+        #if len(fiodata.keys()) == 6:
+            positions = [(a+b)/2. for a,b in zip(fiodata['idrz1(start)'], fiodata['idrz1(end)'])]
+        # supersweep2
+        if command.split()[0] in ['supersweep2']:
+        #elif len(fiodata.keys()) == 7:
+            positions = fiodata['idty2']
+#            for k in fiodata.keys():
+#                if k not in ['idrz1(start)', 'idrz1(end)', 'type', 'filename', 'end pos', 'unix time', 'channel']:
+#                    positions = fiodata[k]
     # select first image
     if tif:
         im = np.array(fabio.open(imageList[0]).data)
@@ -452,7 +532,7 @@ def integrateROI(data, ROI, dark=None, show=False):
     return np.mean(img[xmin:xmax, ymin:ymax])
 
 def getIntensities(imsource, roi):
-    tif,nxs,fio,h5 = False,False,False,False
+    tif,cbf,nxs,fio,h5 = False,False,False,False,False
     if isinstance(imsource, list):
         imageList = imsource
         tif = True
@@ -464,22 +544,26 @@ def getIntensities(imsource, roi):
             if DEBUG: print('Nexus file')
 
         elif imsource.endswith('.fio'):
-            fiodata, savedir, _ = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
+            fiodata, savedir, command, channel = _fioparser(imsource) # this would be great except I have no means to know what kind of fio I'm looking at, which motor positions to take
             fio = True
-            il = imagesFromFio(imsource)
+            #il = imagesFromFio(imsource, channel=channel)
+            il = fiodata['filename']
             print(il)
-            if isinstance(il, str):
-                if il.endswith('nxs'):
-                    data = getDataNXSLambda(il)
-                    nxs = True
-                elif il.endswith('.h5'):
-                    #data = getEigerDataset(il)
-                    h5 = True
-            elif isinstance(il, list):
-                imageList = il
-                tif = True
+            if isinstance(il, list):
+                if len(il) == 1:
+                    il = il[0]
+                    if il.endswith('nxs'):
+                        data = getDataNXSLambda(il)
+                        nxs = True
+                    elif il.endswith('.h5'):
+                        data = getEigerDataset(il)
+                        print('Getting Eiger dataset')
+                        h5 = True
+                elif len(il) > 1:
+                    imageList = il
+                    tif = True
         elif imsource.endswith('.h5'):
-            #data = getEigerDataset(imsource)
+            data = getEigerDataset(imsource)
             if DEBUG: print('Eiger file')
             h5 = True
     else:
@@ -521,22 +605,32 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
     except:
         raise ImportError('gitGauss func: could not import...')
 
-    fiodata, path, command = _fioparser(scanFileName)
+    fiodata, path, command, channel = _fioparser(scanFileName)
     ya = getIntensities(scanFileName, roi) # here we also read back every clearing frame from the beamline file system, not good
     # filtering for exposure frames
     if motor is None:
         motor = command.split(' ')[1]
         if motor == 'idrz1':
-            motor = 'idrz1(encoder)'
+            x = np.array([(a+b)/2. for a,b in zip(fiodata['idrz1(start)'], fiodata['idrz1(end)'])])
+        else:
+            x = np.array(fiodata[motor])
         if DEBUG:
-            print('Motor determined from fio file as: %s', motor)
-    x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
+            print('Motor determined from fio file as: %s' % motor)
+    else:
+        motor = command.split(' ')[1]
+        x = np.array(fiodata[motor])
+        
+    y = np.array(ya)
+    #x = np.array([p for (p,t) in zip(fiodata[motor], fiodata['type']) if t=='exposure'])
+    
     # one would need to know if this was a supersweep or a fastsweep
     # if it was a fastsweep then x needs to be incremented by half the stepsize (this is temporary, eventually the end position will be implemented in the fio)
-    sweeptype = command.split(' ')[0]
-    if sweeptype == 'fastsweep':
-        x = x + (x[1]-x[0])/2.
-    y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
+    
+    # this is fastsweep stuff:
+#    sweeptype = command.split(' ')[0]
+#    if sweeptype == 'fastsweep2':
+#        x = x + (x[1]-x[0])/2.
+#    y = np.array([i for (i,t) in zip(ya, fiodata['type']) if t=='exposure'])
 
     if every is not None:
         if every == 0:
@@ -635,7 +729,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
         if show:
             fig = plt.figure()
             ax = plt.subplot(111)
-            ax.plot(y, x)
+            ax.plot(x, y)
             ax.set_xlabel(motor)
             ax.set_ylabel('Intensity')
             ax.set_title(scanFileName+'\n'+str(roi))
@@ -644,7 +738,7 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
 
 
 def center(direction, start, end, NoSteps, rotstart, rotend,
-           exposure=2, channel=1, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False, every=None):
+           exposure=2, channel=None, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False, every=None):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
@@ -696,15 +790,21 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-
-    supersweepCommand = 'supersweep %s %.3f %.3f %d idrz1 %.3f %.3f %d:1/%.1f 4' % (mot, start, end, NoSteps, rotstart, rotend, channel, exposure)
+    if channel in [2, 3, 4]:
+        supersweepCommand = 'supersweep2 %s %.3f %.3f %d ' % (mot, start, end, NoSteps)
+        supersweepCommand += 'idrz1 %.3f %.3f %d:1/%.1f' % (rotstart, rotend, channel, exposure)
+        if channel in [3, 4]:
+            supersweepCommand += ',fidx=1'
     print(supersweepCommand)
     try:
-        supersweepOut = HU.runMacro(supersweepCommand)
+        _ = HU.runMacro("osh")
+        supersweepOut = runMacro(supersweepCommand, sweep=True)
+        _ = HU.runMacro("csh")
     except Exception as e:
+        print(e)
         raise e
     time.sleep(0.1)
-    fiodata, path, _ = _fioparser(scanFileName)
+    fiodata, path, _, channel = _fioparser(scanFileName)
     path = path['%d' % channel]
     # get ROI:
     if roi is None:
@@ -716,7 +816,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     return positions, res, roi, scanFileName
 
 
-def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1(encoder)', auto=False):
+def centerOmega(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='idrz1', auto=False, showFig=True, fit=True):
     '''
     :param start:
     :param end:
@@ -736,26 +836,126 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=1, roi=None, mot='idrz1
             if i.endswith('.fio'):
                 ScanFile = i.replace('.fio', '')
                 break
-
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    sweepCommand = 'fastsweep idrz1 %.3f %.3f %d:%d/%.1f 4' % (start, end, channel, NoSteps, exposure)
+    if channel in [2, 3, 4]:
+        sweepCommand = 'fastsweep2 '
+        sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
+        if channel in [3, 4]:
+            sweepCommand += ',fidx=1'
     print(sweepCommand)
-    try:
-        sweepOut = HU.runMacro(sweepCommand)
-    except Exception as e:
-        raise e
+    for i in range(5):
+        try:
+            _ = HU.runMacro("osh")
+            sweepOut = runMacro(sweepCommand, sweep=True)
+            _ = HU.runMacro("csh")
+            break
+        except Exception as e:
+            print('Macro exectution failed %i times' % (i+1))
+            traceback.print_exc()
+            time.sleep(0.1)
+        
     time.sleep(0.1)
-    fiodata, path, _ = _fioparser(scanFileName)
+    fiodata, path, _, channel = _fioparser(scanFileName)
     path = path['%d' % channel]
 
     # get ROI:
     if roi is None:
         roi, roiNP = explorer(scanFileName)
-    positions = fiodata[mot]
+    positions = [(a+b)/2. for a,b in zip(fiodata['idrz1(start)'], fiodata['idrz1(end)'])]
     if DEBUG: print('Positions: %d' % len(positions))
-    res = fitGauss(scanFileName, roi, motor=mot)
-    return positions, res, roi, scanFileName
+    if fit:
+        res = fitGauss(scanFileName, roi, motor=None, show=showFig)
+        return positions, res, roi, scanFileName
+
+def recordMap(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='idrz1', auto=False, showFig=True, fit=True):
+    '''
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param exposure:
+    :param channel:
+    :param roi:
+    :param mot:
+    :param auto: pass on parameter, if true, then it supposed to move to the center automatically and does not show the image in the figGauss function
+    :return:
+    '''
+    ScanDir = HU.getEnv('ScanDir')
+    ScanID = HU.getEnv('ScanID')
+    ScanFile = HU.getEnv('ScanFile') # if fio and spec are also saved this is a list
+    if isinstance(ScanFile, list):
+        for i in ScanFile:
+            if i.endswith('.fio'):
+                ScanFile = i.replace('.fio', '')
+                break
+    scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
+    print(scanFileName)
+    if channel in [2, 3, 4]:
+        sweepCommand = 'fastsweep2 '
+        sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
+        if channel in [3, 4]:
+            sweepCommand += ',fidx=1'
+    print(sweepCommand)
+    for i in range(5):
+        try:
+            _ = HU.runMacro("osh")
+            sweepOut = runMacro(sweepCommand, sweep=True)
+            _ = HU.runMacro("csh")
+            break
+        except Exception as e:
+            print('Macro exectution failed %i times' % (i+1))
+            traceback.print_exc()
+            time.sleep(0.1)
+        
+    time.sleep(0.1)
+    fiodata, path, _, channel = _fioparser(scanFileName)
+    path = path['%d' % channel]
+
+    # get ROI:
+    if roi is None:
+        roi, roiNP = explorer(scanFileName)
+    positions = [(a+b)/2. for a,b in zip(fiodata['idrz1(start)'], fiodata['idrz1(end)'])]
+    if DEBUG: print('Positions: %d' % len(positions))
+    if fit:
+        res = fitGauss(scanFileName, roi, motor=None, show=showFig)
+        return positions, res, roi, scanFileName
+
+
+def recordMap2(start, end, NoSteps, exposure=2, channel=None):
+    '''
+    :param start:
+    :param end:
+    :param NoSteps:
+    :param exposure:
+    :param channel:
+    '''
+    print('new version of record map running')
+    ScanDir = HU.getEnv('ScanDir')
+    ScanID = HU.getEnv('ScanID')
+    ScanFile = HU.getEnv('ScanFile') # if fio and spec are also saved this is a list
+    if isinstance(ScanFile, list):
+        for i in ScanFile:
+            if i.endswith('.fio'):
+                ScanFile = i.replace('.fio', '')
+                break
+    scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
+    print(scanFileName)
+    if channel in [2, 3, 4]:
+        sweepCommand = 'fastsweep2 '
+        sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
+        if channel in [3, 4]:
+            sweepCommand += ',fidx=1'
+    print(sweepCommand)
+    for i in range(5):
+        try:
+            _ = HU.runMacro("osh")
+            sweepOut = runMacro(sweepCommand, sweep=True)
+            _ = HU.runMacro("csh")
+            break
+        except Exception as e:
+            print('Macro exectution failed %i times' % (i+1))
+            traceback.print_exc()
+            time.sleep(0.1)
 
 
 def getProj(imageArray, roi, projAxis=0):
@@ -794,11 +994,14 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     '''
     creates a map from an already existing measurement
     '''
-    d, savedir, _ = _fioparser(fiofile)
-    omega = np.array(d['idrz1(encoder)'])
-    omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
-
-    image = imagesFromFio(fiofile, channel=3)
+    d, savedir, _, channel = _fioparser(fiofile)
+    omega = np.array([(a+b)/2. for a,b in zip(d['idrz1(start)'], d['idrz1(end)'])])
+    #omega = np.array(d['idrz1(encoder)'])
+    #omega -= (omega[1]-omega[0])/2. # shifting the omega, because only the final angles are saved for each image
+    image = imagesFromFio(fiofile, channel=channel)
+    if isinstance(image, list):
+        if len(image) == 1:
+            image = image[0]
     assert roi is not None, 'ROI has to be defined and passed on to this function'
     if not isinstance(image, str):
         raise ValueError('fio file contains several images... Supposed to be a single nxs/h5 file')
@@ -871,4 +1074,25 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     fig.colorbar(plot)
     plt.show()
 
+def fatigue(chstart, chend, cycles, bunches, logf, speed=10):
+    command = 'fatigue %.1f %.1f %d %s --speed %.1f --bunch %d' % (chstart, chend, cycles, logf, speed, bunches)
+    print(command)
+    _ = runMacro(command)
+
+def fatigue2(chstart, chend, cycles, bunches, logf, speed=10):
+    command = 'fatigue %.1f %.1f %d %s --speed %.1f --bunch %d' % (chstart, chend, cycles, logf, speed, bunches)
+    print(command)
+    try:
+        _ = runMacro(command)
+    except KeyboardInterrupt:
+        door = PT.DeviceProxy('hasep21eh3:10000/p21/door/hasep21eh3.01')
+        door.StopMacro()
+    except Exception:
+        pass
+        
+
+def set_crosshead_speed(speed):
+    crosshead = PT.DeviceProxy('hasep21eh3:10000/p21/motor/eh3_u4.15')
+    crosshead.slewRate = 266.5 * speed
+    print(f'Crosshead speed set to {speed}')
 
