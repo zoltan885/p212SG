@@ -33,11 +33,9 @@ def _getMovableSpockNames():
     '''
        gets the stepping_motor devices from the online.xml together with the host name
     '''
-    try:
-        import PyTango as PT, HasyUtils as HU
-    except(ImportError):
-        print('Could not import modules PyTango and HasyUtils')
-        return -1
+    if 'PT' not in globals() or 'HU' not in globals():
+        print('ERROR! PyTango & HasyUtils are not available')
+        return None
     names=dict()
     try:
         for rec in HU.getOnlineXML():
