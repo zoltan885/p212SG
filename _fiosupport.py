@@ -1,5 +1,19 @@
 import dateutil.parser
 import json
+import os
+import re
+import numpy as np
+import copy
+
+
+DET_NAMES = {'Varex_1': 'hasep21eh3:10000/p21/Varex/1',
+             'Varex_2': 'hasep21eh3:10000/p21/Varex/2',
+             'Varex_3': 'hasep21eh3:10000/p21/Varex/3',
+             'Varex_4': 'hasep21eh3:10000/p21/Varex/4',
+             'Varex_5': 'hasep21eh3:10000/p21/Varex/5',
+             'Eiger':   'hasep21eh3:10000/p21/Eiger/e4m',
+             'Pilatus': 'hasep21eh3:10000/p21/Pilatus/CdTe2M',
+             'PCO':     'hasep21eh3:10000/p21/PCO/pool',}
 
 
 # there is no way to identify which channel is which detector!?
@@ -24,12 +38,17 @@ class fio:
         """
         
         self.parameters = None
-        self.data = None
+        self.data = {}
+        self.channelData = {}
         self.columns = None
         self.command = None
         self.fioType = None
         self.user = None
-        self.date = None
+        self.startdate = None
+        self.enddate = None
+        self.finished = None
+        self.abtgv2config = None
+        self.channels = {}
         self.detectors = {}
 
         self._read(fn)
@@ -74,7 +93,28 @@ class fio:
 
         self._getComments(lines=lines, start=c+1, end=p)
         self.parameters = self._getParameters(lines=lines, start=p+1, end=d)
-        self.data = self._getData(lines=lines, start=d+1, end=e)
+        self._getData(lines=lines, start=d+1, end=e)
+        self._getEnd(lines=lines)
+
+    def _getEnd(self, lines: str):
+        """
+        Parses the last line of the given lines to determine the end date and status.
+
+        Args:
+            lines (str): A string containing multiple lines of text.
+
+        Sets:
+            self.enddate: The parsed end date from the last line if it starts with '!'.
+            self.finished: The status of the process, set to 'Aborted' if the last line contains 'aborted',
+                           or 'Finished' if the fioType is one of ['fastsweep2', 'supersweep2', 'timesweep2'].
+        """
+        last_line = lines[-1]
+        if last_line.startswith('!'):
+            self.enddate = dateutil.parser.parse(' '.join(last_line.split(' ')[4:9]))
+            if 'aborted' in last_line:
+                self.finished = 'Aborted'
+            elif self.fioType in ['fastsweep2', 'supersweep2', 'timesweep2']:
+                self.finished = 'Finished'
 
     def _getComments(self, lines: str, start: int, end: int):
         """
@@ -98,9 +138,8 @@ class fio:
         self.command = comment[0]
         self.fioType = self.command.split()[0]
         self.user = comment[1].split(' ')[1]
-        self.date = dateutil.parser.parse(' '.join(comment[1].split(' ')[5:]))
-    
-    
+        self.startdate = dateutil.parser.parse(' '.join(comment[1].split(' ')[5:]))
+
     def _getParameters(self, lines: str, start: int, end: int):
         """
         Extracts parameters from a given range of lines and processes them into a dictionary.
@@ -121,40 +160,137 @@ class fio:
         
         for k,v in pars.items():
             if isinstance(v, str):
-                if v.startswith('{') and v.endswith('}'):
-                    v = v[1:-1]
-                    if ',' in v:
-                        self.detectors[k] = {}
-                        key_val = v.split(',')
-                        for kv in key_val:
-                            key = kv.split(':')[0].strip().strip('"')
-                            val = kv.split(':')[1].strip().strip('"')
-                            self.detectors[k][key] = self._type(val)
+                try:
+                    self.detectors[k] = json.loads(v)  # this works for the detector parameters, but not for the ABTGV2_CONF dict
+                    continue
+                except json.JSONDecodeError:
+                    pass
+                except Exception as e:
+                    print(e)
+                
+                if k == ('ABTGV2_CONF'):
+                    tmpv = re.sub(r'\s(\d):', r' "\1":', v)  # add quotes around the single digits with a preceding space
+                    tmpv = re.sub(r'{(\d):', r'{"\1":', tmpv)  # Add quotes around single digits that follow an opening curly brace
+                    tmpv = tmpv.replace('\n', '').replace(' ', '').replace('\'', '\"').replace('(', '[').replace(')', ']')
+                    try:
+                        self.abtgv2config = json.loads(tmpv)
+                    except json.JSONDecodeError:
+                        pass
+                    except Exception as e:
+                        print(e)
+                    
         for k in self.detectors.keys():
             pars.pop(k)
         return pars
 
-    def _getData(self, lines: str, start: int, end: int):
+    def _getChannels(self):
         """
-        Extracts data and column names from a given range of lines.
+        Extracts channel information from the parameters.
+        """
+
+        if self.fioType in ['fastsweep2', 'supersweep2', 'timesweep2'] and self.abtgv2config is not None:
+            usedchannels = [c[0] for c in self.command.split() if ':' in c]
+            for ch in usedchannels:
+                dets = self.abtgv2config['detectors'][ch]
+                self.channels[ch] = []
+                #self.channels[ch] = {}
+                for d in dets:
+                    for k,v in DET_NAMES.items():
+                        if d in v:
+                            self.channels[ch].append(k)
+                            #self.channels[ch][k] = {}
+
+    def _getChannelData(self, ch: str):
+        """
+        Retrieve and process data for a specific channel.
+
+        This method checks if the specified channel exists in the `channels` attribute.
+        If not, it attempts to refresh the channels list. If the channel still does not
+        exist, it raises a ValueError. For each detector in the channel, it copies the
+        data and removes columns that do not correspond to the detector. It also renames
+        the detector's column to 'imageID' and removes rows that do not contain valid
+        data for the specified detector. Finally, it adds directory and file pattern
+        information to the data.
 
         Args:
-            lines (str): The input lines from which data and columns are extracted.
+            ch (str): The channel identifier.
+
+        Raises:
+            ValueError: If the specified channel is not found in the data.
+        """
+
+        if ch not in self.channels:
+            self._getChannels()
+        if ch not in self.channels:
+            raise ValueError(f'Channel {ch} not found in the data.')
+        self.channelData[ch] = {}
+        for det in self.channels[ch]:
+            self.channelData[ch][det] = self.data.copy()
+            # remove other detectors image number columns
+            for data_label in list(self.channelData[ch][det].keys()):
+                if data_label in self.detectors.keys():
+                    if data_label == det:
+                        print(f'Renaming {data_label} to imageID')
+                        self.channelData[ch][det]['imageID'] = self.channelData[ch][det].pop(data_label)
+                    if data_label != det:
+                        print(f'Removing {data_label} from {ch=} {det}')
+                        _ = self.channelData[ch][det].pop(data_label)
+        # remove data lines that do not contain valid data for the specified detector
+        for det in self.channelData[ch].keys():
+            nones = []
+            for i,l in enumerate(self.channelData[ch][det]['imageID']):
+                if l == '<no-data>':
+                    nones.append(i)
+            for k in self.channelData[ch][det].keys():
+                self.channelData[ch][det][k] = [v for i,v in enumerate(self.channelData[ch][det][k]) if i not in nones]
+        # add the directory and file pattern to the data
+        for det in self.channelData[ch].keys():
+            self.channelData[ch][det]['Filedir'] = self.detectors[det]['Filedir']
+            self.channelData[ch][det]['Filepattern'] = self.detectors[det]['Filepattern']
+        self.channelData[ch][det]['Files'] = self._getFileList(ch)
+
+    def _getFileList(self, ch: str):
+        """
+        Generates a dictionary of file paths for a given channel.
+        Args:
+            ch (str): The channel identifier.
+        Returns:
+            dict: A dictionary where keys are detector identifiers and values are lists of file paths.
+        """
+        
+        files = {}
+        for det in self.channelData[ch].keys():
+            files[det] = []
+            for id in self.channelData[ch][det]['imageID']:
+                files[det].append(os.path.join(self.channelData[ch][det]['Filedir'], self.channelData[ch][det]['Filepattern']%id))
+        return files    
+
+
+    def _getData(self, lines: str, start: int, end: int):
+        """
+        Extracts and processes data from a given range of lines.
+
+        Args:
+            lines (str): The input lines containing data.
             start (int): The starting index of the range of lines to process.
             end (int): The ending index of the range of lines to process.
 
         Returns:
-            np.ndarray: A 2D numpy array containing the extracted data, transposed.
+            None: The function updates the instance's `columns` and `data` attributes.
         """
+
         self.columns = []
+        coldtype = []
         data = []
         for l in lines[start:end]:
             if l.startswith(' Col'):
                 self.columns.append(l.split()[2])
+                coldtype.append(l.split()[-1].lower())
             else:
                 data.append([self._type(ll) for ll in l.split()])  # Convert to float
         data = list(map(list, zip(*data)))  # Transpose the data
-        return data
+        for c,d,dt in zip(self.columns, data, coldtype):
+            self.data[c] = d
 
     def export(self , fn: str):
         """
@@ -165,3 +301,21 @@ class fio:
         """
         with open(fn, 'w') as f:
             json.dump(self.__dict__, open(fn, 'w'), default=str, indent=4, sort_keys=True)
+
+
+def test(f='ts2.fio'):
+    a = fio(f)
+    a._getChannels()
+    print(f'{a.channels=}')
+    for ch in a.channels.keys():
+        a._getChannelData(ch)
+    print(f'{a.channelData['3'].keys()=}')
+    for ch in a.channels.keys():
+        print(f'{ch=}')
+        for k,v in a.channelData[ch].items():
+            print(f'{k=}')
+            print(f'{v.keys()=}')
+            print(f'{a.channelData[ch][k]['imageID']=}')
+    
+    return a
+

@@ -5,7 +5,7 @@ Created on Tue Mar 10 10:57:06 2020
 
 @author: hegedues
 """
-
+import logging
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
@@ -23,6 +23,22 @@ try:
     import HasyUtils as HU
 except ImportError:
     print('WARNING! Could not import PyTango & HasyUtils')
+
+
+logFormatter = logging.Formatter(
+    "%(asctime)-25.25s %(threadName)-12.12s %(name)-25.24s %(levelname)-10.10s %(message)s")
+rootLogger = logging.getLogger()
+rootLogger.setLevel(logging.DEBUG)
+# logging.getLogger().setLevel(logging.DEBUG)
+fileHandler = logging.FileHandler(os.path.join(os.getcwd(), 'log.log'))
+fileHandler.setFormatter(logFormatter)
+rootLogger.addHandler(fileHandler)
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(logFormatter)
+rootLogger.addHandler(consoleHandler)
+
+log = logging.getLogger(__name__)
 
 
 DEBUG = 1
