@@ -10,35 +10,55 @@ Created on Thu Mar  5 14:29:20 2020
 # %autoreload 2
 # sys.path.append('/home/p212user/sardanaMacros/sg') # <-- path to directory containing the import modules
 
+import sys
+import os
+import shutil
+import logging
+
+logFormatter = logging.Formatter(
+    "%(asctime)-25.25s %(threadName)-12.12s %(name)-25.24s %(levelname)-10.10s %(message)s")
+rootLogger = logging.getLogger()
+rootLogger.setLevel(logging.DEBUG)
+# logging.getLogger().setLevel(logging.DEBUG)
+fileHandler = logging.FileHandler(os.path.join(os.getcwd(), 'log.log'))
+fileHandler.setFormatter(logFormatter)
+rootLogger.addHandler(fileHandler)
+
+consoleHandler = logging.StreamHandler()
+consoleHandler.setFormatter(logFormatter)
+rootLogger.addHandler(consoleHandler)
+
+log = logging.getLogger(__name__)
+logging.getLogger("asyncio").setLevel(logging.WARNING)  # This supresses the urllib3 debug messages
+
 
 TEST = False
 DEBUG = True
 
 try:
     import PyTango as PT
+except ImportError:
+    log.warning('Could not import PyTango')
+try:
     import HasyUtils as HU
 except ImportError:
-    print('Could not import PyTango & HasyUtils')
-import sys
-import os
-import shutil
+    log.warning('Could not import HasyUtils')
+
 
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.widgets import Slider
 from matplotlib.patches import Rectangle
 import time
-
+from matplotlib.backends.backend_pdf import PdfPages
+from collections import OrderedDict
+import json
+import yaml
 from PIL import Image
 
 import _func
 from importlib import reload
 reload(_func)
-from matplotlib.backends.backend_pdf import PdfPages
-
-from collections import OrderedDict
-import json
-import yaml
 
 
 SE = '\033[41m'
@@ -66,6 +86,36 @@ VAREXMIDCH = 4
 def lsenvironment():
     ip = get_ipython() # this only works from Ipython, where get_ipython is in the global namespace
     ip.magic('lsenv')
+
+
+def _prepare_config_yaml(path):
+    comment = '''
+# This is an automatically generated measurement configuration file for single grain diffraction measurements.
+# This file contains the name of the necessary devices.
+# The device instance has to be filled.
+# The user may define new devices following the syntax:
+# dev_name: instance(with full path)
+# Alternatively local spock names may also be used
+# Comment lines begin with hashtag and empty lines are discarded.
+
+'''
+    dct = { 'movables': {'mot_hor': 'idty2',
+                        'mot_ver': 'idtz2',
+                        'mot_rot': 'idrz1',
+                        'mot_ff_det_hor': 'eigery',
+                        'mot_ff_det_ver': 'eigerz',
+                        },
+            'counters' : {'cou_eh3entrance': 'hasep21eh3:10000/p21/keithley2602b/1/MeasCurrent'},
+            'detectors': {'near': 'hasep21eh3:10000/p21/eiger/e4m',
+                          'far1': 'hasep21eh2:10000/p21/eiger/e1mw01',
+                          'far2': 'hasep21eh2:10000/p21/eiger/e1mw02',},
+            'auxiliary': {'mot_st': 'eh3st',
+                          'mot_sb': 'eh3sb',
+                          'mot_si': 'eh3si',
+                          'mot_so': 'eh3so'},}
+    with open(path+'/config.yaml', 'w') as f:
+        f.write(comment)
+        yaml.dump(dct, f)
 
 
 
@@ -100,7 +150,16 @@ def _prepare_config_file(path):
 def _getFullName(dev):
     return dev.get_db_host().replace('.desy.de', '')+':10000/'+dev.dev_name()
 
-
+def _getDetChannel(dev):
+    '''
+    get the ABTGV2 channel configuration
+    '''
+    dct = HU.getEnv('ABTGV2_CONF')
+    dets = dct['detectors']
+    for k,v in dets.items():
+        if v == dev:
+            return k
+    return None
 
 
 
@@ -143,17 +202,42 @@ class Measurement:
             self.devs_mov[k] = {'name': devices['movables'][k], 'dev': self.import_device(devices['movables'][k])}
         for k in devices['auxiliary'].keys():
             self.devs_aux[k] = {'name': devices['auxiliary'][k], 'dev': self.import_device(devices['auxiliary'][k])}
+        for k in devices['counters'].keys():
+            self.devs_counters[k] = {'name': devices['counters'][k], 'dev': self.import_device(devices['counters'][k])}
+        for k in devices['detectors'].keys():
+            self.devs_det[k] = {'name': devices['detectors'][k], 'dev': self.import_device(devices['detectors'][k])}
         self.spock = get_ipython()
         print('Init finished')
 
-
+    def read_config_yaml(self, config_file):
+        '''
+        reads in the given configuration file
+        it returns a nested dictionary with 'movables', 'counters', 'detectors' and auxiliary devices
+        '''
+        devices = {'movables': {}, 'counters': {}, 'detectors': {}, 'auxiliary': {}}
+        try:
+            with open(config_file, 'r') as f:
+                data = yaml.load(f, Loader=yaml.FullLoader)
+        except:
+            print(f'Error! {config_file} could not be opened.')
+        
+        for k in data['movables'].keys():
+            devices['movables'][k] = data['movables'][k]
+        for k in data['counters'].keys():
+            devices['counters'][k] = data['counters'][k]
+        for k in data['auxiliary'].keys():
+            devices['auxiliary'][k] = data['auxiliary'][k]
+        for k in data['detectors'].keys():
+            devices['detectors'][k] = data['detectors'][k]
+        print('Config file successfully loaded')
+        return devices
 
     def read_config_file(self, config_file):
         '''
         reads in the given configuration file
-        it returns a nested dictionary with 'moveables', 'counters'...
+        it returns a nested dictionary with 'movables', 'counters', 'detectors' and auxiliary devices
         '''
-        devices = {'movables': {}, 'counters': {}, 'auxiliary': {}}
+        devices = {'movables': {}, 'counters': {}, 'detectors': {}, 'auxiliary': {}}
         try:
             with open(config_file, 'r') as f:
                 data = f.read()
@@ -174,34 +258,48 @@ class Measurement:
                 if 'aux' in key:
                     for v in value.split():
                         devices['auxiliary'][v] = v
-
-
         print('Config file successfully loaded')
         return devices
+    
+
 
 
     def import_device(self, dev_name):
         '''
         import a single device
         dev_name is the instance name with full path or alternatively a local (same host!) spock name
+        if dev_name is an attribute name it will be imported as an attribute proxy
         '''
+        dev_proxy = False
+        attr_proxy = False
         if '/' not in dev_name:
             sn = _func._getMovableSpockNames()
 #            dev_name = HU.getHostname()+':10000/'+sn[dev_name]
             dev_name = sn[dev_name]
         try:
-            dev = PT.DeviceProxy(dev_name)
+            if dev_name.count('/') == 4:
+                attr = PT.AttributeProxy(dev_name)
+                attr_proxy = True
+            elif dev_name.count('/') == 3:
+                dev = PT.DeviceProxy(dev_name)
+                dev_proxy = True
         except:
             print('Could not import %s' % dev_name)
             sys.exit(1)
         try:
-            dev.state()
+            if dev_proxy:
+                dev.state()
+            elif attr_proxy:
+                _ = attr.read()
         except Exception as e:
             print('%s\nWarning! %s imported successfully, but does not respond.' % (e, dev_name))
             self.write_log('%s\nWarning! %s imported successfully, but does not respond.' % (e, dev_name))
         if DEBUG: print('%s device imported' % dev_name)
         if DEBUG: self.write_log('%s device imported' % dev_name)
-        return dev
+        if dev_proxy:
+            return dev
+        if attr_proxy:
+            return attr
 
 
     def create_directory(self):  
@@ -551,6 +649,16 @@ class Grain(object):
     #                       self.mot_ver, self.current_pos()[1],
     #                       self.mot_rot, self.current_pos()[2]))
     def goto_grain_center(self, farDet=False, careful=True):
+        """
+        Move the system to the grain center position.
+
+        Parameters:
+        farDet (bool): If True, include detector motors in the movement command. Default is False.
+        careful (bool): If True, print the current positions of the motors before moving. Default is True.
+
+        Returns:
+        None
+        """
         cp = self.current_pos()
         command = 'umv %s %f %s %f %s %f' % (self.mot_hor, cp['y'], self.mot_ver, cp['z'], self.mot_rot, cp['o'])
         if farDet:
@@ -568,7 +676,26 @@ class Grain(object):
         #self.spock.magic(command)
 
 
-    def centerH(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=None, auto=False, log=True, focus=False):
+    def centerH(self, start: float, end: float, NoSteps: int, rotstart: float, rotend: float, exposure: float = DEFEXPTIME, channel: int = None, auto: bool = False, log: bool = True, focus: bool = False):
+        """
+        Perform horizontal centering of the grain.
+        Parameters:
+        start (float): Starting position for centering.
+        end (float): Ending position for centering.
+        NoSteps (int): Number of steps for centering.
+        rotstart (float): Starting rotation angle.
+        rotend (float): Ending rotation angle.
+        exposure (float, optional): Exposure time for centering. Default is DEFEXPTIME.
+        channel (int, optional): Channel to be used for centering. Must be one of [2, 3, 4]. Default is None.
+        auto (bool, optional): If True, automatically move to the center. Default is False.
+        log (bool, optional): If True, log the centering process. Default is True.
+        focus (bool, optional): If True, use focused beam. Default is False.
+        Raises:
+        AssertionError: If the channel is not in [2, 3, 4].
+        Returns:
+        None
+        """
+        
         assert channel in [2,3,4], 'Wrong channel'
         if channel == 1:
             #self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)

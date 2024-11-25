@@ -12,8 +12,11 @@ DET_NAMES = {'Varex_1': 'hasep21eh3:10000/p21/Varex/1',
              'Varex_4': 'hasep21eh3:10000/p21/Varex/4',
              'Varex_5': 'hasep21eh3:10000/p21/Varex/5',
              'Eiger':   'hasep21eh3:10000/p21/Eiger/e4m',
+             'Eiger1mw01': 'hasep21eh2:10000/p21/Eiger/e1mw01',
+             'Eiger1mw02': 'hasep21eh2:10000/p21/Eiger/e1mw02',
              'Pilatus': 'hasep21eh3:10000/p21/Pilatus/CdTe2M',
              'PCO':     'hasep21eh3:10000/p21/PCO/pool',}
+DET_NAMES = {k.lower(): v.lower() for k,v in DET_NAMES.items()}
 
 
 # there is no way to identify which channel is which detector!?
@@ -95,6 +98,18 @@ class fio:
         self.parameters = self._getParameters(lines=lines, start=p+1, end=d)
         self._getData(lines=lines, start=d+1, end=e)
         self._getEnd(lines=lines)
+        
+        self._getChannels()
+        for ch in self.channels.keys():
+            try:
+                self._getChannelData(ch)
+            except KeyError:
+                raise ValueError(f'Channel {ch} contains more than one detector. This is currenlty not supported.')
+        
+        try:
+            self._convertToMidMotorPosition()
+        except AssertionError:
+            pass
 
     def _getEnd(self, lines: str):
         """
@@ -159,6 +174,7 @@ class fio:
                 pars[key] = self._type(val)
         
         for k,v in pars.items():
+            k=k.lower()  # this is to create lower case keys for the detectors
             if isinstance(v, str):
                 try:
                     self.detectors[k] = json.loads(v)  # this works for the detector parameters, but not for the ABTGV2_CONF dict
@@ -168,19 +184,28 @@ class fio:
                 except Exception as e:
                     print(e)
                 
-                if k == ('ABTGV2_CONF'):
+                if k == ('ABTGV2_CONF'.lower()):
                     tmpv = re.sub(r'\s(\d):', r' "\1":', v)  # add quotes around the single digits with a preceding space
                     tmpv = re.sub(r'{(\d):', r'{"\1":', tmpv)  # Add quotes around single digits that follow an opening curly brace
                     tmpv = tmpv.replace('\n', '').replace(' ', '').replace('\'', '\"').replace('(', '[').replace(')', ']')
                     try:
                         self.abtgv2config = json.loads(tmpv)
+                        # change all detector device strings to lowercase
+                        for k,v in self.abtgv2config.items():
+                            if isinstance(v, dict):
+                                for kk,vv in v.items():
+                                    if isinstance(vv, list):
+                                        for i,l in enumerate(vv):
+                                            vv[i] = vv[i].lower()
+
                     except json.JSONDecodeError:
                         pass
                     except Exception as e:
                         print(e)
                     
-        for k in self.detectors.keys():
-            pars.pop(k)
+#        for k in self.detectors.keys():
+#            #k = k.lower()  # the lower case keys can not be used here
+#            pars.pop(k)
         return pars
 
     def _getChannels(self):
@@ -196,7 +221,7 @@ class fio:
                 #self.channels[ch] = {}
                 for d in dets:
                     for k,v in DET_NAMES.items():
-                        if d in v:
+                        if d.lower() in v.lower():
                             self.channels[ch].append(k)
                             #self.channels[ch][k] = {}
 
@@ -227,13 +252,14 @@ class fio:
         for det in self.channels[ch]:
             self.channelData[ch][det] = self.data.copy()
             # remove other detectors image number columns
+            # TODO: this is not working for mutiple detectors on the same channel, because it removes all of them
             for data_label in list(self.channelData[ch][det].keys()):
-                if data_label in self.detectors.keys():
-                    if data_label == det:
+                if data_label.lower() in [k.lower() for k in list(self.detectors.keys())]:
+                    if data_label.lower() == det.lower():
                         print(f'Renaming {data_label} to imageID')
                         self.channelData[ch][det]['imageID'] = self.channelData[ch][det].pop(data_label)
-                    if data_label != det:
-                        print(f'Removing {data_label} from {ch=} {det}')
+                    if data_label.lower() != det.lower():
+                        print(f'Removing {data_label=} from {ch=} for {det=}')
                         _ = self.channelData[ch][det].pop(data_label)
         # remove data lines that do not contain valid data for the specified detector
         for det in self.channelData[ch].keys():
@@ -247,9 +273,9 @@ class fio:
         for det in self.channelData[ch].keys():
             self.channelData[ch][det]['Filedir'] = self.detectors[det]['Filedir']
             self.channelData[ch][det]['Filepattern'] = self.detectors[det]['Filepattern']
-        self.channelData[ch][det]['Files'] = self._getFileList(ch)
+            self.channelData[ch][det]['Files'] = self.getFileList(ch)
 
-    def _getFileList(self, ch: str):
+    def getFileList(self, ch: str):
         """
         Generates a dictionary of file paths for a given channel.
         Args:
@@ -261,8 +287,11 @@ class fio:
         files = {}
         for det in self.channelData[ch].keys():
             files[det] = []
-            for id in self.channelData[ch][det]['imageID']:
-                files[det].append(os.path.join(self.channelData[ch][det]['Filedir'], self.channelData[ch][det]['Filepattern']%id))
+            if '%' in self.channelData[ch][det]['Filepattern']:  # tif or cbf files
+                for id in self.channelData[ch][det]['imageID']:
+                    files[det].append(os.path.join(self.channelData[ch][det]['Filedir'], self.channelData[ch][det]['Filepattern']%id))
+            else: # h5 files
+                files[det].append(os.path.join(self.channelData[ch][det]['Filedir'], self.channelData[ch][det]['Filepattern']))
         return files    
 
 
@@ -292,6 +321,18 @@ class fio:
         for c,d,dt in zip(self.columns, data, coldtype):
             self.data[c] = d
 
+    def _convertToMidMotorPosition(self):
+        '''
+        Converts encoder start and end positions to middle (avg) positions.
+        '''
+        if self.fioType in ['fastsweep2', 'supersweep2']:
+            assert len(([i for i in self.columns if i.endswith('(start)')])) == 1, 'More than one start position found.'
+            assert len([i for i in self.columns if i.endswith('(end)')]) == 1, 'More than one end position found.'
+            start_str = [i for i in self.columns if i.endswith('(start)')][0]
+            end_str = [i for i in self.columns if i.endswith('(end)')][0]
+            self.columns.append('sweep_mot_mid_pos')
+            self.data['sweep_mot_mid_pos'] = [(s+e)/2 for s,e in zip(self.data[start_str], self.data[end_str])]
+
     def export(self , fn: str):
         """
         Exports the data to a specified json file.
@@ -302,6 +343,16 @@ class fio:
         with open(fn, 'w') as f:
             json.dump(self.__dict__, open(fn, 'w'), default=str, indent=4, sort_keys=True)
 
+    def getDataFile(self, channel=None): # this is a crappy method
+        assert self.fioType in ['fastsweep2', 'supersweep2', 'timesweep2'], 'Only fastsweep and supersweep fio objects implement this method.'
+        assert len(list(self.channels.keys())) == 1, 'Only one channel is supported.'
+        assert len(list(self.channels.values())[0]) == 1, 'Only one detector per channel is supported.'
+        if channel is None:
+            channel = list(self.channels.keys())[0]
+        assert self.channelData[channel][list(self.channels.values())[0][0]]['Filepattern'].endswith('.h5'), 'Only h5 files are supported.'
+        path = self.channelData[channel][list(self.channels.values())[0][0]]['Filedir']
+        file = self.channelData[channel][list(self.channels.values())[0][0]]['Filepattern']
+        return os.path.join(path, file), channel
 
 def test(f='ts2.fio'):
     a = fio(f)
