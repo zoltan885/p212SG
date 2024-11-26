@@ -193,7 +193,7 @@ def _fioparser(fn=None, onlyexp=False):
         if channelNo in [3,4]:
             data['filename'] = sorted(glob.glob(os.path.join(savedir[str(channelNo)], '*.cbf')), key = os.path.getmtime)
             data['type'] = ['exposure' for f in data['filename']]
-        elif channelNo == 2:
+        elif channelNo in [1, 2]:
             data['filename'] = glob.glob(os.path.join(savedir[str(channelNo)], '*_data_*.h5'))
     return data, savedir, command, channelNo
 
@@ -804,7 +804,7 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
 
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    if channel in [2, 3, 4]:
+    if channel in [1, 2, 3, 4]:
         supersweepCommand = 'supersweep2 %s %.3f %.3f %d ' % (mot, start, end, NoSteps)
         supersweepCommand += 'idrz1 %.3f %.3f %d:1/%.1f' % (rotstart, rotend, channel, exposure)
         if channel in [3, 4]:
@@ -852,7 +852,7 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='id
                 break
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    if channel in [2, 3, 4]:
+    if channel in [1, 2, 3, 4]:
         sweepCommand = 'fastsweep2 '
         sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
         if channel in [3, 4]:
@@ -904,7 +904,7 @@ def recordMap(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='idrz
                 break
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    if channel in [2, 3, 4]:
+    if channel in [1, 2, 3, 4]:
         sweepCommand = 'fastsweep2 '
         sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
         if channel in [3, 4]:
@@ -954,7 +954,7 @@ def recordMap2(start, end, NoSteps, exposure=2, channel=None):
                 break
     scanFileName = ScanDir + '/' + ScanFile + '_%.05d.fio' % (ScanID+1)
     print(scanFileName)
-    if channel in [2, 3, 4]:
+    if channel in [1, 2, 3, 4]:
         sweepCommand = 'fastsweep2 '
         sweepCommand += 'idrz1 %.3f %.3f %d:%d/%.1f' % (start, end, channel, NoSteps, exposure)
         if channel in [3, 4]:
@@ -1042,7 +1042,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     th_ax = fig.add_subplot(grid[-1, 0])
     th_ax.set_xlabel('theta [pix]')
 
-    y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
+    #y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
 
     if maxint is None:
         print('Using %.0f percentile as max' % percentile)

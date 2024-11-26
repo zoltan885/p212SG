@@ -78,8 +78,8 @@ LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 #LARGEBEAM      = {'oh3st': 0.15, 'oh3sb': 0.15, 'oh3so': 0.15, 'oh3si': 0.15}
 FOCUSEDBEAM    = {'eh3st': 0.015, 'eh3sb': 0.02, 'eh3so': 0.05, 'eh3si': 0.05}
 
-
-EIGERCH = 2
+CHANNELS = {1: 'Eiger1mw01', 2: 'Eiger1mw02', 3: 'Varex'}
+EIGERCH = 1
 VAREXCLOSECH = 3
 VAREXMIDCH = 4
 
@@ -178,7 +178,12 @@ class Measurement:
         log
     '''
     def __init__(self, config_file, path, load=False):
-        devices = self.read_config_file(config_file)
+        if config_file.endswith('dat'):
+            devices = self.read_config_file(config_file)
+        elif config_file.endswith('yaml'):
+            devices = self.read_config_file(config_file)
+        else:
+            raise ValueError(f'Not a valid conig file extension: {config_file}')
         if DEBUG:
             print(devices)
         self.devs_mov = {}
@@ -696,16 +701,19 @@ class Grain(object):
         None
         """
         
-        assert channel in [2,3,4], 'Wrong channel'
-        if channel == 1:
-            #self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
-            self.M.write_log('wrong channel')
-        if channel == VAREXMIDCH:
-            #self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
-            self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
-        if channel == EIGERCH:
-            #self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
-            self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
+        # assert channel in [2,3,4], 'Wrong channel'
+        # if channel == 1:
+        #     #self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
+        #     self.M.write_log('wrong channel')
+        # if channel == VAREXMIDCH:
+        #     #self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
+        #     self.M.write_log('Horizontal centering with Varex on grain: %s' % self.name)
+        # if channel == EIGERCH:
+        #     #self.M.write_log('Horizontal centering with Lambda on grain: %s' % self.name)
+        #     self.M.write_log('Horizontal centering with Eiger on grain: %s' % self.name)
+        
+        assert channel in list(CHANNELS.keys()), 'Channel not configured'
+        self.M.write_log(f'Horizontal centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
             self.M.set_slit_size(FOCUSEDBEAM)
@@ -716,11 +724,11 @@ class Grain(object):
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == EIGERCH:
-            _ = HU.runMacro('eigerLive off')
+        elif 'Eiger' in CHANNELS[channel]:
+            _ = HU.runMacro('eigersLive off')
             #self.spock.magic('eigerLive off')
-        elif channel == 1:
-            pass
+        # elif channel == 1:
+        #     pass
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
@@ -755,16 +763,19 @@ class Grain(object):
 
 
     def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True, focus=False):
-        assert channel in [2,3,4], 'Wrong channel'
-        if channel == 1:
-            #self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
-            self.M.write_log('Wrong channel')
-        if channel == VAREXMIDCH:
-            #self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
-            self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
-        if channel == EIGERCH:
-            #self.M.write_log('Vertical centering with Lambda on grain: %s' % self.name)
-            self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
+        # assert channel in [2,3,4], 'Wrong channel'
+        # if channel == 1:
+        #     #self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
+        #     self.M.write_log('Wrong channel')
+        # if channel == VAREXMIDCH:
+        #     #self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
+        #     self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
+        # if channel == EIGERCH:
+        #     #self.M.write_log('Vertical centering with Lambda on grain: %s' % self.name)
+        #     self.M.write_log('Vertical centering with Eiger on grain: %s' % self.name)
+        
+        assert channel in list(CHANNELS.keys()), 'Channel not configured'
+        self.M.write_log(f'Vertical centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
             self.M.set_slit_size(FOCUSEDBEAM)
@@ -775,9 +786,9 @@ class Grain(object):
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == EIGERCH:
+        elif 'Eiger' in CHANNELS[channel]:
             #self.spock.magic('eigerLive off')
-            _ = HU.runMacro('eigerLive off')
+            _ = HU.runMacro('eigersLive off')
         elif channel == 1:
             pass
         time.sleep(0.1)
@@ -814,16 +825,19 @@ class Grain(object):
         #self.new_pos()
 
     def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=None, auto=False, mode=24, log=True, focus=False, fit=True):
-        assert channel in [2,3,4], 'Wrong channel'
-        if channel == 1:
-            #self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
-            self.M.write_log('Wrong channel')
-        if channel == VAREXMIDCH:
-            #self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
-            self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
-        if channel == EIGERCH:
-            #self.M.write_log('Angular centering with Lambda on grain: %s' % self.name)
-            self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
+        # assert channel in [2,3,4], 'Wrong channel'
+        # if channel == 1:
+        #     #self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
+        #     self.M.write_log('Wrong channel')
+        # if channel == VAREXMIDCH:
+        #     #self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
+        #     self.M.write_log('Angular centering with Varex on grain: %s' % self.name)
+        # if channel == EIGERCH:
+        #     #self.M.write_log('Angular centering with Lambda on grain: %s' % self.name)
+        #     self.M.write_log('Angular centering with Eiger on grain: %s' % self.name)
+        
+        assert channel in list(CHANNELS.keys()), 'Channel not configured'
+        self.M.write_log(f'Angular centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
             self.M.set_slit_size(FOCUSEDBEAM)
@@ -834,11 +848,11 @@ class Grain(object):
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
-        elif channel == EIGERCH:
+        elif 'Eiger' in CHANNELS[channel]:
             #self.spock.magic('eigerLive off')
-            _ = HU.runMacro('eigerLive off')
-        elif channel == 1:
-            pass
+            _ = HU.runMacro('eigersLive off')
+        # elif channel == 1:
+        #     pass
         time.sleep(0.1)
 
         positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[str(channel)], fit=fit)
@@ -908,6 +922,9 @@ class Grain(object):
             self.M.Lambda.StopAcq()
             time.sleep(0.1)
             self.M.Lambda.SaveAllImages = True
+        elif 'Eiger' in CHANNELS[channel]:
+            #self.spock.magic('eigerLive off')
+            _ = HU.runMacro('eigersLive off')
 
         _func.recordMap2(start, end, NoSteps, exposure=exposure, channel=channel)
 
