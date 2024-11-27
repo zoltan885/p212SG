@@ -55,10 +55,14 @@ from collections import OrderedDict
 import json
 import yaml
 from PIL import Image
+from collections import namedtuple
 
 import _func
+import gui_data
 from importlib import reload
 reload(_func)
+reload(gui_data)
+
 
 
 SE = '\033[41m'
@@ -79,6 +83,8 @@ LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
 FOCUSEDBEAM    = {'eh3st': 0.015, 'eh3sb': 0.02, 'eh3so': 0.05, 'eh3si': 0.05}
 
 CHANNELS = {1: 'Eiger1mw01', 2: 'Eiger1mw02', 3: 'Varex'}
+DEFAULTCHANNEL = 1
+
 EIGERCH = 1
 VAREXCLOSECH = 3
 VAREXMIDCH = 4
@@ -88,7 +94,7 @@ def lsenvironment():
     ip.magic('lsenv')
 
 
-def _prepare_config_yaml(path):
+def _prepare_config_json(path):
     comment = '''
 # This is an automatically generated measurement configuration file for single grain diffraction measurements.
 # This file contains the name of the necessary devices.
@@ -113,10 +119,9 @@ def _prepare_config_yaml(path):
                           'mot_sb': 'eh3sb',
                           'mot_si': 'eh3si',
                           'mot_so': 'eh3so'},}
-    with open(path+'/config.yaml', 'w') as f:
+    with open(path+'/config.json', 'w') as f:
         f.write(comment)
-        yaml.dump(dct, f)
-
+        json.dump(dct, f)
 
 
 def _prepare_config_file(path):
@@ -161,7 +166,7 @@ def _getDetChannel(dev):
             return k
     return None
 
-
+   
 
 class Measurement:
     '''
@@ -178,6 +183,8 @@ class Measurement:
         log
     '''
     def __init__(self, config_file, path, load=False):
+        self.experiment_state = 'init'
+        self.expstate_ctr = 1
         if config_file.endswith('dat'):
             devices = self.read_config_file(config_file)
         elif config_file.endswith('yaml'):
@@ -200,7 +207,8 @@ class Measurement:
         #self.temp_setup_detector_folders()
         self.create_logfile()
 
-        self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Varex3', '4': 'Varex4'}
+        #self.detChannels = {'1': 'Perkin', '2': 'Eiger', '3': 'Varex3', '4': 'Varex4'}
+        self.detChannels = {str(k): v for k,v in CHANNELS.items()}
 
         # make nested dict out of the device dict
         for k in devices['movables'].keys():
@@ -212,30 +220,41 @@ class Measurement:
         for k in devices['detectors'].keys():
             self.devs_det[k] = {'name': devices['detectors'][k], 'dev': self.import_device(devices['detectors'][k])}
         self.spock = get_ipython()
+        self.devicesDict = devices
+        self.create_measurement_json()
+        
         print('Init finished')
 
-    def read_config_yaml(self, config_file):
-        '''
-        reads in the given configuration file
-        it returns a nested dictionary with 'movables', 'counters', 'detectors' and auxiliary devices
-        '''
-        devices = {'movables': {}, 'counters': {}, 'detectors': {}, 'auxiliary': {}}
+    def new_exp_state(self, state):
+        self.experiment_state = state
+        self.expstate_ctr += 1
+        for k,v in self.logger.objList.items():
+            k.create_grain_state_json()
+        self.create_grain_state_json()
+        self.logger._backup()
+        self.logger.logNow()
+
+    def read_config_json(self, config_file):
+        """
+        Reads a JSON configuration file and returns its contents as a dictionary.
+
+        Args:
+            config_file (str): The path to the JSON configuration file.
+
+        Returns:
+            dict: The contents of the JSON configuration file.
+
+        Raises:
+            Exception: If the file cannot be opened or read.
+        """
+
         try:
             with open(config_file, 'r') as f:
-                data = yaml.load(f, Loader=yaml.FullLoader)
+                data = json.load(f)
         except:
             print(f'Error! {config_file} could not be opened.')
-        
-        for k in data['movables'].keys():
-            devices['movables'][k] = data['movables'][k]
-        for k in data['counters'].keys():
-            devices['counters'][k] = data['counters'][k]
-        for k in data['auxiliary'].keys():
-            devices['auxiliary'][k] = data['auxiliary'][k]
-        for k in data['detectors'].keys():
-            devices['detectors'][k] = data['detectors'][k]
         print('Config file successfully loaded')
-        return devices
+        return data
 
     def read_config_file(self, config_file):
         '''
@@ -307,7 +326,7 @@ class Measurement:
             return attr
 
 
-    def create_directory(self):  
+    def create_directory(self, createDetDirs=False):  
         if os.path.exists(self.measurement_path):
             if TEST:
                 shutil.rmtree(self.measurement_path)
@@ -323,20 +342,21 @@ class Measurement:
         except:
             print(SE+'Cannot create directory'+EE)
             raise
-        self.varexdir = os.path.join(self.measurement_path, 'Varex')
-        os.makedirs(self.varexdir)
-        # TEMPORARY: put paths to folders in the environment
-        #HU.setEnv('PE_c_folder', '%s'%self.varexdir.replace('/gpfs/', 't:/'))
-        #self.lambdadir = self.measurement_path+os.sep+'lambda'
-        #os.mkdir(self.lambdadir)
-        #HU.setEnv('Lambda_hr_folder', self.lambdadir)
-        self.eigerdir = os.path.join(self.measurement_path, 'Eiger')
-        os.makedirs(self.eigerdir)
+        if createDetDirs:
+            self.varexdir = os.path.join(self.measurement_path, 'Varex')
+            os.makedirs(self.varexdir)
+            # TEMPORARY: put paths to folders in the environment
+            #HU.setEnv('PE_c_folder', '%s'%self.varexdir.replace('/gpfs/', 't:/'))
+            #self.lambdadir = self.measurement_path+os.sep+'lambda'
+            #os.mkdir(self.lambdadir)
+            #HU.setEnv('Lambda_hr_folder', self.lambdadir)
+            self.eigerdir = os.path.join(self.measurement_path, 'Eiger')
+            os.makedirs(self.eigerdir)
 
-        #os.mkdir(self.measurement_path+os.sep+'DIC')
-        #os.mkdir(self.measurement_path+os.sep+'LPA')
-        #HU.setEnv('LPA_folder', self.measurement_path.replace('/gpfs/', 't:/')+os.sep+'LPA')
-        #HU.setEnv('DIC_folder', self.measurement_path+os.sep+'DIC')
+            #os.mkdir(self.measurement_path+os.sep+'DIC')
+            #os.mkdir(self.measurement_path+os.sep+'LPA')
+            #HU.setEnv('LPA_folder', self.measurement_path.replace('/gpfs/', 't:/')+os.sep+'LPA')
+            #HU.setEnv('DIC_folder', self.measurement_path+os.sep+'DIC')
 
     def load_directory(self):
         if not os.path.isabs(self.measurement_path):
@@ -361,8 +381,20 @@ class Measurement:
         self.varex.FileDir = self.varexdir.replace('/gpfs/', 't:/')
         self.varex.FileName = 'PE1_%I.tif'
         self.Lambda.SaveFilePath = self.lambdadir
+   
 
-
+    def create_measurement_json(self):
+        fold = os.path.join(self.measurement_path, 'jsons')
+        os.makedirs(fold)
+        dct = {'creation_time': time.asctime(),
+               'devices': self.devicesDict,
+               'measurement_path': self.measurement_path,
+               'logfile': self.logfile,
+               'grains': {}
+               }
+        with open(os.path.join(fold, 'measurement.json'), 'w') as f:
+            json.dump()
+            json.dump(dct, f)
 
 
     def create_logfile(self):
@@ -421,7 +453,7 @@ class logger(object):
     '''
     def __init__(self, fname):
         self.j = fname+'.json'
-        self.y = fname+'.yml'
+        self.y = fname+'.yaml'
         #self.attrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'intensity', 'fitpars', 'positions']
         self.objList = {}  # dict holding the registered classes
 
@@ -442,7 +474,7 @@ class logger(object):
             if hasattr(inst, 'logAttrs'):
                 for a in inst.logAttrs:
                     try:
-                        dumpDict[g][a] = eval('inst.%s' % a)
+                        dumpDict[g][a] = getattr(inst, a)  # eval('inst.%s' % a)
                     except:
                         dumpDict[g][a] = ['?',]
             else:  # nothing to log
@@ -508,7 +540,6 @@ class Grain(object):
         self._dethpos = [self.M.devs_mov['mot_ff_det_hor']['dev'].position]
         self._detvpos = [self.M.devs_mov['mot_ff_det_ver']['dev'].position]
 
-
         if grdct is not None:
             self._loadGrainFromFile(grdct)
         else:
@@ -527,7 +558,11 @@ class Grain(object):
             self.fitpars = [{'?': '?'}]
             self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
             self.M.logger.logNow()
+        
+        # create grain JSON file
+        self.create_grain_json()
 
+        self.centerPoss = {'centerY': None, 'centerZ': None, 'centerO': None}  # this dict holds the most recent center positions, centering functions should overwrite these values
 
         # self.roi  = None
         # self.Lroi = None
@@ -556,15 +591,81 @@ class Grain(object):
         if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor)
         self.spock = get_ipython()
 
-    def _appendPos(self):
+    def create_grain_json(self):
+        self.measurementJSON = os.path.join(M.measurement_path, 'jsons', f'{self.name}.json')
+        with open(self.measurementJSON, 'w') as f:
+            json.dump({'name': self.name,
+                       'creation_time': time.asctime(),
+                       'positions': self.positions,
+                       'state': {},  # here should be link to the grain state JSON file 
+                       }, f)
+        
+        # append the grain to the measurement JSON file
+        self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', 'measurement.json')
+
+    def create_grain_state_json(self):
+        gsd = gui_data.GrainStateData()
+        gsd.update_empty()
+        savepath = os.path.join(self.M.measurement_path, 'jsons')
+        gsd._set_save_path(savepath)
+        self.current_grain_state_json = os.path.join(savepath, self.name + '_' + self.M.experiment_state + '.json')
+        gsd._save_to_file(self.current_grain_state_json)
+
+
+    def append_to_grain_state_json(file, field, fio=None, roi=None):
+        '''
+        appends the given fields to the json file
+        field may be centerY, centerZ, centerO or roi
+
+        '''
+        with open(file, 'r') as f:
+            data = json.load(f)
+        if 'center' in field:
+            appdata = {'fiofile': fio, 'fiodata': None, 'scanID': None, 'h5file': None, 'h5data': None, 'usedroi': None, 'fitresults': None}
+        if 'Y' in field:
+            if len(data['data']['centerYs']) == 0:
+                data['data']['centerYs'] = [appdata]
+            else:
+                data['data']['centerYs'].append(appdata)
+        if 'Z' in field:
+            if len(data['data']['centerZs']) == 0:
+                data['data']['centerZs'] = [appdata]
+            else:
+                data['data']['centerZs'].append(appdata)
+        if 'Omega' in field:
+            if len(data['data']['centerOmegas']) == 0:
+                data['data']['centerOmegas'] = [appdata]
+            else:
+                data['data']['centerOmegas'].append(appdata)
+        if 'map' in field:
+            appdata = {'fiofile': fio, 'fiodata': None, 'scanID': None, 'h5file': None, 'h5data': None, 'usedroi': None, 'map': None}
+            if len(data['data']['maps']) == 0:
+                data['data']['maps'] = [appdata]
+            else:
+                data['data']['maps'].append(appdata)
+        if 'roi' in field:
+            data['rois'].append(gui_data.ROI(*roi))
+        with open(file.split('.')[0]+'_appended.json', 'w') as f:
+            json.dump(data, f)
+        return data
+    
+
+    def _appendPos(self, y=None, z=None, o=None):
         '''
         Append the current motor positions to the self.positions list
+        At the end of a supersweep2 the omega motor stays at the last position, while the y and z motors move to the center!
+        Because of this the omega motor position is appended wrongly at the end of a supersweep2
         '''
-        dct = {'y': self.M.devs_mov['mot_hor']['dev'].position,
-              'z': self.M.devs_mov['mot_ver']['dev'].position,
-              'o': self.M.devs_mov['mot_rot']['dev'].position,
-              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,}
-              #'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position}
+        y = self.M.devs_mov['mot_hor']['dev'].position if y is None else y
+        z = self.M.devs_mov['mot_ver']['dev'].position if z is None else z
+        o = self.M.devs_mov['mot_rot']['dev'].position if o is None else o
+    
+        dct = {'y': y,
+              'z': z,
+              'o': o,
+              'det_y': self.M.devs_mov['mot_ff_det_hor']['dev'].position,
+              'det_z': self.M.devs_mov['mot_ff_det_ver']['dev'].position,
+              }
         self.positions.append(dct)
 
     def _appendSlitPos(self):
@@ -599,7 +700,8 @@ class Grain(object):
             if attr not in grdct.keys():
                 raise Exception('%s could not be found in the yaml/json file' % attr)
         for k,v in grdct.items():
-            exec("self.%s = grdct['%s']" % (k, k))
+            setattr(self, k, grdct[k])
+            #exec("self.%s = grdct['%s']" % (k, k))
 #        self.positions = grdct['positions']
 #        self.timestamp = grdct['timestamp']
 #        self.action = grdct['action']
@@ -680,8 +782,33 @@ class Grain(object):
         _ = HU.runMacro(command)
         #self.spock.magic(command)
 
+    def centerHr(self,
+                 start,
+                 end,
+                 NoSteps,
+                 rotstart,
+                 rotend,
+                 exposure=DEFEXPTIME,
+                 channel=DEFAULTCHANNEL,
+                 auto=False,
+                 log=True,
+                 focus=False):
+        current_pos = self.M.devs_mov['mot_hor']['dev'].position
+        start -= current_pos
+        end += current_pos
+        self.centerH(start, end, NoSteps, rotstart, rotend, exposure, channel, auto, log, focus)
 
-    def centerH(self, start: float, end: float, NoSteps: int, rotstart: float, rotend: float, exposure: float = DEFEXPTIME, channel: int = None, auto: bool = False, log: bool = True, focus: bool = False):
+    def centerH(self,
+                start:float,
+                end:float,
+                NoSteps:int,
+                rotstart:float,
+                rotend:float,
+                exposure:float = DEFEXPTIME,
+                channel:int = DEFAULTCHANNEL,
+                auto:bool = False,
+                log:bool =True,
+                focus: bool = False):
         """
         Perform horizontal centering of the grain.
         Parameters:
@@ -734,6 +861,7 @@ class Grain(object):
         positions, res, self.cROIs[str(channel)], fio = _func.center('h', start, end, NoSteps+1, rotstart, rotend,
                                                                 exposure=exposure, channel=channel,
                                                                 roi=self.cROIs[str(channel)], every=None)
+        self.centerPoss['centerY'] = res['cen']  # update the center position in the live object
         
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
@@ -747,7 +875,7 @@ class Grain(object):
             self.M.write_log('Automatically moved to the center.')
 
         if log:
-            self._appendPos()
+            self._appendPos(y=self.centerPoss['centerY'], z=self.centerPoss['centerZ'], o=self.centerPoss['centerO'])
             self.timestamp.append(time.asctime())
             self.action.append('centerH')
             self.direction.append('H')
@@ -759,10 +887,37 @@ class Grain(object):
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
 
+        self.append_to_grain_state_json(self.current_grain_state_json, 'centerY', fio=fio)
+
         #self.new_pos()
 
+    def centerVr(self,
+                 start,
+                 end,
+                 NoSteps,
+                 rotstart,
+                 rotend,
+                 exposure=DEFEXPTIME,
+                 channel=DEFAULTCHANNEL,
+                 auto=False,
+                 log=True,
+                 focus=False):
+        current_pos = self.M.devs_mov['mot_ver']['dev'].position
+        start -= current_pos
+        end += current_pos
+        self.centerV(start, end, NoSteps, rotstart, rotend, exposure, channel, auto, log, focus)
 
-    def centerV(self, start, end, NoSteps, rotstart, rotend, exposure=DEFEXPTIME, channel=2, auto=False, log=True, focus=False):
+    def centerV(self,
+                start:float,
+                end:float,
+                NoSteps:int,
+                rotstart:float,
+                rotend:float,
+                exposure:float=DEFEXPTIME,
+                channel:int=DEFAULTCHANNEL,
+                auto:bool=False,
+                log:bool=True,
+                focus:bool=False):
         # assert channel in [2,3,4], 'Wrong channel'
         # if channel == 1:
         #     #self.M.write_log('Vertical centering with Varex on grain: %s' % self.name)
@@ -796,7 +951,7 @@ class Grain(object):
         positions, res, self.cROIs[str(channel)], fio = _func.center('v', start, end, NoSteps+1, rotstart, rotend,
                                                                 exposure=exposure, channel=channel,
                                                                 roi=self.cROIs[str(channel)], every=None)
-
+        self.centerPoss['centerZ'] = res['cen']  # update the center position in the live object
 
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=False)
@@ -810,7 +965,7 @@ class Grain(object):
             self.M.write_log('Automatically moved to the center.')
 
         if log:
-            self._appendPos()
+            self._appendPos(y=self.centerPoss['centerY'], z=self.centerPoss['centerZ'], o=self.centerPoss['centerO'])
             self.timestamp.append(time.asctime())
             self.action.append('centerH')
             self.direction.append('H')
@@ -822,7 +977,23 @@ class Grain(object):
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
 
+        self.append_to_grain_state_json(self.current_grain_state_json, 'centerZ', fio=fio)
+
         #self.new_pos()
+
+    def centerOr(self,
+                 start:float,
+                 end:float,
+                 NoSteps:int,
+                 exposure:float=DEFEXPTIME,
+                 channel:int=DEFAULTCHANNEL,
+                 auto:bool=False,
+                 log:bool=True,
+                 focus:bool=False):
+        current_pos = self.M.devs_mov['mot_rot']['dev'].position
+        start -= current_pos
+        end += current_pos
+        self.centerO(start, end, NoSteps, exposure, channel, auto, log, focus)
 
     def centerO(self, start, end, NoSteps, exposure=DEFEXPTIME, channel=None, auto=False, mode=24, log=True, focus=False, fit=True):
         # assert channel in [2,3,4], 'Wrong channel'
@@ -855,8 +1026,14 @@ class Grain(object):
         #     pass
         time.sleep(0.1)
 
-        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, end, NoSteps, exposure=exposure, channel=channel, roi=self.cROIs[str(channel)], fit=fit)
-
+        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, 
+                                                                          end,
+                                                                          NoSteps,
+                                                                          exposure=exposure,
+                                                                          channel=channel,
+                                                                          roi=self.cROIs[str(channel)],
+                                                                          fit=fit)
+        self.centerPoss['centerO'] = res['cen']
 
         self.M.write_log('Logfile: %s' % fio)
         self.M.write_log('Selected roi %s' % self.cROIs[str(channel)], addtime=True)
@@ -871,7 +1048,7 @@ class Grain(object):
             self.M.write_log('Automatically moved to the center.')
 
         if logger is not None:
-            self._appendPos()
+            self._appendPos(y=self.centerPoss['centerY'], z=self.centerPoss['centerZ'], o=self.centerPoss['centerO'])
             self.timestamp.append(time.asctime())
             self.action.append('centerO')
             self.direction.append('O')
@@ -882,6 +1059,8 @@ class Grain(object):
             self.integRes.append({'pos': list(positions), 'int': ['?']})  # TODO: expose the intensity?
             self.fitpars.append({'cen': res['cen'], 'fwhm': res['fwhm']})
             self.M.logger.logNow()
+        
+        self.append_to_grain_state_json(self.current_grain_state_json, 'centerO', fio=fio)
 
         #self.new_pos()
 
@@ -897,6 +1076,13 @@ class Grain(object):
         else:
             print(SE+'No image source defined!'+EE)
         # rewrite _fioparser such that it returns a dict or an object with the attribute command, parse the command and figure out the motor name from there!
+        # get the motor name, this seems to be already done in the fitGauss function
+        # motor = None
+        # if imsource.endswith('.fio'):
+        #     _,_,c,_ = _func._fioparser(imsource)
+        #     motor = c[1]
+        #     assert motor in ['idty2', 'idtz2', 'idrz1'], f'Motor {motor} not recognized'
+        #     print(f'Motor: {motor}')
         res = _func.fitGauss(imsource, self.cROIs[str(channel)], motor=None, gotoButton=False, gotofitpos=False, every=every)
 
 
@@ -926,7 +1112,7 @@ class Grain(object):
             #self.spock.magic('eigerLive off')
             _ = HU.runMacro('eigersLive off')
 
-        _func.recordMap2(start, end, NoSteps, exposure=exposure, channel=channel)
+        _, _, _, fio = _func.recordMap2(start, end, NoSteps, exposure=exposure, channel=channel)
 
 #        positions, res, self.cROIs[str(channel)], fio = _func.centerOmega(start, 
 #                                   end,
@@ -953,6 +1139,8 @@ class Grain(object):
             self.integRes.append((['?'], ['?']))
             self.fitpars.append({'cen': '?', 'fwhm': '?'})
             self.M.logger.logNow()
+
+        self.append_to_grain_state_json(self.current_grain_state_json, 'map', fio=fio)
 
 
     def recordMapRelative(self, span, noSteps, exposure=None, channel=2):
@@ -996,6 +1184,8 @@ class Grain(object):
             self.integRes.append((['?'], ['?']))
             self.fitpars.append({'cen': '?', 'fwhm': '?'})
             self.M.logger.logNow()
+        
+        self.append_to_grain_state_json(self.current_grain_state_json, 'roi', roi=self.cROIs[str(channel)])
 
 
 

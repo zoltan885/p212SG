@@ -44,11 +44,18 @@ log = logging.getLogger(__name__)
 DEBUG = 1
 
 
-
 def _getMovableSpockNames():
-    '''
-       gets the stepping_motor devices from the online.xml together with the host name
-    '''
+    """
+    Retrieves the stepping_motor devices from the online.xml file along with their host names.
+
+    This function checks if the global variables 'PT' and 'HU' are available. If not, it prints an error message and returns None.
+    If available, it parses the online.xml file using the HasyUtils (HU) module to find devices of type 'stepping_motor' or 'type_tango'.
+    It then constructs a dictionary where the keys are the device names (in lowercase) and the values are the concatenation of the host name and device name (both in lowercase).
+
+    Returns:
+        dict: A dictionary with device names as keys and "host/device" strings as values, or None if 'PT' or 'HU' are not available.
+    """
+
     if 'PT' not in globals() or 'HU' not in globals():
         print('ERROR! PyTango & HasyUtils are not available')
         return None
@@ -67,7 +74,22 @@ def _getMovableSpockNames():
 
 
 # partly from HasyUtils
-def runMacroDoor(macroString, retry=5, sweep=False):
+def runMacroDoor(macroString:str, retry:int=5, sweep:bool=False):
+    """
+    Executes a macro on a specified DOOR device with optional retries and sweep crash handling.
+
+    Parameters:
+    macroString (str): The macro command string to be executed.
+    retry (int, optional): The number of retry attempts to connect to the door. Default is 5.
+    sweep (bool, optional): If True, attempts to restore from a sweep crash if an exception occurs. Default is False.
+
+    Returns:
+    str: The output from the door after executing the macro.
+
+    Raises:
+    AssertionError: If the door cannot be connected after the specified number of retries.
+    Exception: If an error occurs during the execution of the macro.
+    """
     lst = macroString.split()
     door = None
     for i in range(retry):
@@ -94,7 +116,21 @@ def runMacroDoor(macroString, retry=5, sweep=False):
     return door.output
 
 
-def runMacro(macro, retry=True, sweep=False):
+def runMacro(macro:str, retry:bool=True, sweep:bool=False):
+    """
+    Executes a given macro with optional retry and sweep functionality.
+
+    Parameters:
+    macro (str): The name of the macro to be executed.
+    retry (bool): If True, the function will retry executing the macro up to 5 times if it fails. Defaults to True.
+    sweep (bool): If True, the function will attempt to run a 'restoreSweepCrash' macro in case of an exception. Defaults to False.
+
+    Returns:
+    Any: The output of the executed macro.
+
+    Raises:
+    Exception: If the macro execution fails and retry is set to False, or if all retry attempts fail.
+    """
     if retry:
         tries = 5
     else:
@@ -117,11 +153,21 @@ def runMacro(macro, retry=True, sweep=False):
 
 
 def _fioparser(fn=None, onlyexp=False):
-    '''
-    :param fn: fio file
-    :param onlyexp: if true it only returns the exposure frames
-    :return:
-    '''
+    """
+    Parses a fio file and extracts comments, parameters, and data.
+
+    Args:
+        fn (str, optional): Path to the fio file. If None, raises a ValueError.
+        onlyexp (bool, optional): If True, only returns the exposure frames. Defaults to False.
+
+    Returns:
+        tuple: A tuple containing:
+            - data (dict): A dictionary where keys are column names and values are numpy arrays of the corresponding data.
+            - savedir (dict): A dictionary mapping channel numbers to their respective file directories.
+            - command (str): The command extracted from the fio file.
+            - channelNo (int): The channel number extracted from the command.
+    """
+
     if fn is None:
         raise ValueError
     lines = open(fn).read().splitlines()
@@ -197,6 +243,30 @@ def _fioparser(fn=None, onlyexp=False):
             data['filename'] = glob.glob(os.path.join(savedir[str(channelNo)], '*_data_*.h5'))
     return data, savedir, command, channelNo
 
+
+def _parse_command(command):
+    """
+    Parses a command string and extracts motor, start, end, and step values.
+
+    Args:
+        command (str): The command string to parse. Expected to start with 
+                       'fastsweep2' or 'supersweep2' followed by motor, start, 
+                       end, and step values separated by spaces.
+
+    Returns:
+        tuple: A tuple containing motor (str), start (str), end (str), and step (str).
+
+    Raises:
+        AssertionError: If the command does not start with 'fastsweep2' or 'supersweep2'.
+    """
+    cc = command.split()
+    assert cc[0] in ['fastsweep2', 'supersweep2'], f'Command not recognized:\n{command}'
+    if cc[0] in ['fastsweep2', 'supersweep2']:
+        motor = cc[1]
+        start = cc[2]
+        end = cc[3]
+        step = cc[4]
+        return motor, start, end, step
 
 def imagesFromFio(fiofile, channel=None):
     data, savedir, _, _ = _fioparser(fiofile)
@@ -751,8 +821,19 @@ def fitGauss(scanFileName, roi, motor=None, show=True, gotoButton=False, gotofit
         raise ValueError('Fit did not work')
 
 
-def center(direction, start, end, NoSteps, rotstart, rotend,
-           exposure=2, channel=None, horizontalCenteringMotor='idty2', verticalCenteringMotor='idtz2', roi=None, auto=False, every=None):
+def center(direction,
+           start,
+           end,
+           NoSteps,
+           rotstart,
+           rotend,
+           exposure=2,
+           channel=None,
+           horizontalCenteringMotor='idty2',  # TODO read from the config file
+           verticalCenteringMotor='idtz2',  # TODO read from the config file
+           roi=None,
+           auto=False,
+           every=None):
     '''
     drives a supersweep for the vertical or horizontal DIRECTION from START to END in NOSTEPS steps
     at every step it takes a single omega integration from currentpos-SWIVEL/2 to currentpos+SWIVEL/2
@@ -830,7 +911,16 @@ def center(direction, start, end, NoSteps, rotstart, rotend,
     return positions, res, roi, scanFileName
 
 
-def centerOmega(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='idrz1', auto=False, showFig=True, fit=True):
+def centerOmega(start,
+                end,
+                NoSteps,
+                exposure=2,
+                channel=None,
+                roi=None,
+                mot='idrz1',  # TODO read from the config file
+                auto=False,
+                showFig=True,
+                fit=True):
     '''
     :param start:
     :param end:
@@ -882,7 +972,16 @@ def centerOmega(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='id
         res = fitGauss(scanFileName, roi, motor=None, show=showFig)
         return positions, res, roi, scanFileName
 
-def recordMap(start, end, NoSteps, exposure=2, channel=None, roi=None, mot='idrz1', auto=False, showFig=True, fit=True):
+def recordMap(start,
+              end,
+              NoSteps,
+              exposure=2,
+              channel=None,
+              roi=None,
+              mot='idrz1',  # TODO read from the config file
+              auto=False,
+              showFig=True,
+              fit=True):
     '''
     :param start:
     :param end:
@@ -970,6 +1069,7 @@ def recordMap2(start, end, NoSteps, exposure=2, channel=None):
             print('Macro exectution failed %i times' % (i+1))
             traceback.print_exc()
             time.sleep(0.1)
+    return None, None, None, scanFileName
 
 
 def getProj(imageArray, roi, projAxis=0):
