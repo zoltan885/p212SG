@@ -360,13 +360,13 @@ def test(f='ts2.fio'):
     print(f'{a.channels=}')
     for ch in a.channels.keys():
         a._getChannelData(ch)
-    print(f'{a.channelData['3'].keys()=}')
+    print(f'{a.channelData["3"].keys()=}')
     for ch in a.channels.keys():
         print(f'{ch=}')
         for k,v in a.channelData[ch].items():
             print(f'{k=}')
             print(f'{v.keys()=}')
-            print(f'{a.channelData[ch][k]['imageID']=}')
+            print(f'{a.channelData[ch][k]["imageID"]=}')
     
     return a
 

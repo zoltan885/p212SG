@@ -229,8 +229,10 @@ class Measurement:
         self.experiment_state = state
         self.expstate_ctr += 1
         for k,v in self.logger.objList.items():
-            k.create_grain_state_json()
-        self.create_grain_state_json()
+            v.create_grain_state_json()
+        # update the grain jsons to refer to the new state
+        # TODO
+
         self.logger._backup()
         self.logger.logNow()
 
@@ -393,7 +395,6 @@ class Measurement:
                'grains': {}
                }
         with open(os.path.join(fold, 'measurement.json'), 'w') as f:
-            json.dump()
             json.dump(dct, f)
 
 
@@ -588,11 +589,14 @@ class Grain(object):
         self.M.write_log('"%s" grain object defined with positions:' % (self.name), nonl=True)
         self.M.log_positions(addtime=False)
 
+        self.create_grain_json()
+
         if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor)
         self.spock = get_ipython()
 
     def create_grain_json(self):
-        self.measurementJSON = os.path.join(M.measurement_path, 'jsons', f'{self.name}.json')
+        self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', f'{self.name}.json')
+        if DEBUG: print(self.measurementJSON)
         with open(self.measurementJSON, 'w') as f:
             json.dump({'name': self.name,
                        'creation_time': time.asctime(),
@@ -604,7 +608,7 @@ class Grain(object):
         self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', 'measurement.json')
 
     def create_grain_state_json(self):
-        gsd = gui_data.GrainStateData()
+        gsd = gui_data.grainStateData()
         gsd.update_empty()
         savepath = os.path.join(self.M.measurement_path, 'jsons')
         gsd._set_save_path(savepath)

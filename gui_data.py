@@ -10,7 +10,7 @@ import yaml
 import os
 import tempfile
 from copy import copy
-from jsondiff import diff
+#from jsondiff import diff
 import numpy.ma as maskedarray
 from pyFAI import detectors
 
@@ -137,7 +137,7 @@ class grainStateData(grainStateDataEmpty):
         except AssertionError:
             raise AssertionError('Not supported fio type')
         except FileNotFoundError:
-            raise FileNotFoundError(f'No such file {self.data[action][idx]['h5file']}')
+            raise FileNotFoundError(f'No such file {self.data[action][idx]["h5file"]}')
 
 
     def get_intensity(self, fioname, test=False, masked=True):
@@ -235,7 +235,7 @@ class grainStateData(grainStateDataEmpty):
             name = name[:-5]
         if self.logFileName is None:
             self.logFileName = name
-            print('Log file name set to {self.logFileName}')
+            print(f'Log file name set to {self.logFileName}')
         if self.logPath is None:
             raise AttributeError('Save path is not set')
         if self.empty is None:
@@ -250,7 +250,7 @@ class grainStateData(grainStateDataEmpty):
                 # use a tempfile to write the json and then read it back and save it as yaml
                 # incredibly ugly, but it works, as opposed to json.dumps(), because that produces a non human readable output
                 tmp = ''
-                with tempfile.NamedTemporaryFile(mode='w', delete_on_close=False) as f:
+                with tempfile.NamedTemporaryFile(mode='w', delete=False) as f:  # delete_on_close=False only possible from 3.12, with delete=False the file will remain on disk even after the context manager exited.
                     json.dump(self.empty, f)
                     f.close()
                     with open(f.name, 'rb') as f:
