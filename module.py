@@ -75,6 +75,13 @@ DEFEXPTIME = 0.5
 HORIZONTALBEAM = {'eh3st': 0.025, 'eh3sb': 0.025, 'eh3so': 0.15, 'eh3si': 0.15}
 VERTICALBEAM   = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.025, 'eh3si': 0.025}
 LARGEBEAM      = {'eh3st': 0.15, 'eh3sb': 0.15, 'eh3so': 0.15, 'eh3si': 0.15}
+HOR_FOCUS_DEV_NAME = 'hasep21eh3:10000/p21/hexapodmotor/oh3.03'
+HOR_FOCUS_IN = 8.8692
+HOR_FOCUS_OUT = -3.1308
+VER_FOCUS_DEV_NAME = 'hasep212oh:10000/p21/smaractmotor/down.02'
+VER_FOCUS_IN = 1.67
+VER_FOCUS_OUT = -38.34
+
 
 
 #HORIZONTALBEAM = {'oh3st': 0.025, 'oh3sb': 0.025, 'oh3so': 0.15, 'oh3si': 0.15}
@@ -236,6 +243,13 @@ class Measurement:
         self.logger._backup()
         self.logger.logNow()
 
+    def add_grain_to_measurement_json(self, name, file):
+        with open(self.measurement_json, 'r') as f:
+            data = json.load(f)
+        data['grains'][name] = file
+        with open(self.measurement_json, 'w') as f:
+            json.dump(data, f)
+
     def read_config_json(self, config_file):
         """
         Reads a JSON configuration file and returns its contents as a dictionary.
@@ -394,7 +408,8 @@ class Measurement:
                'logfile': self.logfile,
                'grains': {}
                }
-        with open(os.path.join(fold, 'measurement.json'), 'w') as f:
+        self.measurement_json = os.path.join(fold, 'measurement.json')
+        with open(self.measurement_json, 'w') as f:
             json.dump(dct, f)
 
 
@@ -440,6 +455,30 @@ class Measurement:
         #self.spock.magic(c)
         _ = HU.runMacro(c)
         self.write_log('Slits set to: %s' % posdict)
+    
+    def move_lenses(self, beamshape=None):
+        pass
+    
+    def _move_lenses(self, beamshape='nofocus'):
+        assert beamshape in ['nofocus', 'vertical', 'horizontal'], 'Focus position not recognised'
+        h_dev = PT.DeviceProxy(HOR_FOCUS_DEV_NAME)
+        v_dev = PT.DeviceProxy(VER_FOCUS_DEV_NAME)
+        if beamshape == 'nofocus':
+            h_dev.position = HOR_FOCUS_OUT
+            v_dev.position = VER_FOCUS_OUT
+            self.write_log('Focusing elements set to non focusing condition')
+        elif beamshape == 'vertical':
+            h_dev.position = HOR_FOCUS_IN
+            h_dev.position = VER_FOCUS_OUT
+            self.write_log('Focusing elements set to vertical beam condition')
+        elif beamshape == 'horizontal':
+            h_dev.position = HOR_FOCUS_OUT
+            h_dev.position = VER_FOCUS_IN
+            self.write_log('Focusing elements set to horizontal beam condition')
+        while h_dev.state() != PT.DevState.ON and v_dev.state() != PT.DevState.ON:
+            time.sleep(0.1)
+        return None
+            
 
 
 '''
@@ -560,8 +599,6 @@ class Grain(object):
             self.logAttrs = ['timestamp', 'direction', 'detector', 'slit', 'scanID', 'ROIs', 'integRes', 'fitpars', 'positions']
             self.M.logger.logNow()
         
-        # create grain JSON file
-        self.create_grain_json()
 
         self.centerPoss = {'centerY': None, 'centerZ': None, 'centerO': None}  # this dict holds the most recent center positions, centering functions should overwrite these values
 
@@ -589,23 +626,40 @@ class Grain(object):
         self.M.write_log('"%s" grain object defined with positions:' % (self.name), nonl=True)
         self.M.log_positions(addtime=False)
 
+        # create grain JSON file
         self.create_grain_json()
+        # add grain to the measurment json
+        self.M.add_grain_to_measurement_json(self.name, self.grainJSON)
+        # create empty grain state json file
+        self.create_grain_state_json()
 
         if DEBUG: print(self.mot_hor, self.mot_ver, self.mot_rot, self.detmot_hor)
         self.spock = get_ipython()
 
     def create_grain_json(self):
-        self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', f'{self.name}.json')
-        if DEBUG: print(self.measurementJSON)
-        with open(self.measurementJSON, 'w') as f:
+        self.grainJSON = os.path.join(self.M.measurement_path, 'jsons', f'{self.name}.json')
+        if DEBUG: print(self.grainJSON)
+        with open(self.grainJSON, 'w') as f:
             json.dump({'name': self.name,
                        'creation_time': time.asctime(),
                        'positions': self.positions,
                        'state': {},  # here should be link to the grain state JSON file 
                        }, f)
-        
-        # append the grain to the measurement JSON file
-        self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', 'measurement.json')
+        #self.measurementJSON = os.path.join(self.M.measurement_path, 'jsons', 'measurement.json')
+
+    def append_grain_to_measurement_json(self, name, grainJSON):
+        with open(self.M.measurementJSON, 'r') as f:
+            data = json.load(f)
+        data['grains'][name] = self.grainJSON
+        with open(self.M.measurementJSON, 'w') as f:
+            json.dump(data, f)
+
+    def append_state_to_grain_json(self, state, grainStateJSON):
+        with open(self.grainJSON, 'r') as f:
+            data = json.load(f)
+        data['state'][self.M.experiment_state] = grainStateJSON
+        with open(self.grainJSON, 'w') as f:
+            json.dump(data, f)
 
     def create_grain_state_json(self):
         gsd = gui_data.grainStateData()
@@ -614,44 +668,67 @@ class Grain(object):
         gsd._set_save_path(savepath)
         self.current_grain_state_json = os.path.join(savepath, self.name + '_' + self.M.experiment_state + '.json')
         gsd._save_to_file(self.current_grain_state_json)
+        self.append_state_to_grain_json(self.M.experiment_state, self.current_grain_state_json)
 
 
-    def append_to_grain_state_json(file, field, fio=None, roi=None):
+    def append_to_grain_state_json(self, file, field, fio=None, roi=None, test=False):
         '''
         appends the given fields to the json file
-        field may be centerY, centerZ, centerO or roi
+        field may be centerY, centerZ, centerO, map or roi
+        if the filed already exists with the same fio file, then it 
 
         '''
-        with open(file, 'r') as f:
+        if self.M.experiment_state != self._last_exp_state:
+            if test:
+                print('New experiment state detected')
+                self.create_grain_state_json()
+                self._last_exp_state = self.M.experiment_state
+        
+        with open(self.current_grain_state_json, 'r') as f:
             data = json.load(f)
         if 'center' in field:
             appdata = {'fiofile': fio, 'fiodata': None, 'scanID': None, 'h5file': None, 'h5data': None, 'usedroi': None, 'fitresults': None}
-        if 'Y' in field:
-            if len(data['data']['centerYs']) == 0:
-                data['data']['centerYs'] = [appdata]
-            else:
-                data['data']['centerYs'].append(appdata)
-        if 'Z' in field:
-            if len(data['data']['centerZs']) == 0:
-                data['data']['centerZs'] = [appdata]
-            else:
-                data['data']['centerZs'].append(appdata)
-        if 'Omega' in field:
-            if len(data['data']['centerOmegas']) == 0:
-                data['data']['centerOmegas'] = [appdata]
-            else:
-                data['data']['centerOmegas'].append(appdata)
+            if 'Y' in field:
+                print(len(data['data']['centerYs']))
+                print(data['data']['centerYs'][0]['fiofile'])
+                if len(data['data']['centerYs']) == 1 and data['data']['centerYs'][0]['fiofile'] == None:  # initial state
+                    data['data']['centerYs'] = [appdata]
+                elif len(data['data']['centerYs']) == 1 and data['data']['centerYs'][0]['fiofile'] == fio:  # fio was already present
+                    print('Data was already there')
+                else:
+                    data['data']['centerYs'].append(appdata)  # new fio
+            if 'Z' in field:
+                if len(data['data']['centerZs']) == 1 and data['data']['centerZs'][0]['fiofile'] in None:
+                    data['data']['centerZs'] = [appdata]
+                elif len(data['data']['centerZs']) == 1 and data['data']['centerZs'][0]['fiofile'] in fio:
+                    print('Data was already there')
+                else:
+                    data['data']['centerZs'].append(appdata)
+            if 'Omega' in field:
+                if len(data['data']['centerOmegas']) == 1 and data['data']['centerOmegas'][0]['fiofile'] in None:
+                    data['data']['centerOmegas'] = [appdata]
+                elif len(data['data']['centerOmegas']) == 1 and data['data']['centerOmegas'][0]['fiofile'] in fio:
+                    print('Data was already there')
+                else:
+                    data['data']['centerOmegas'].append(appdata)
         if 'map' in field:
             appdata = {'fiofile': fio, 'fiodata': None, 'scanID': None, 'h5file': None, 'h5data': None, 'usedroi': None, 'map': None}
-            if len(data['data']['maps']) == 0:
+            if len(data['data']['maps']) == 1 and data['data']['maps'][0]['fiofile'] in None:
                 data['data']['maps'] = [appdata]
+            elif len(data['data']['maps']) == 1 and data['data']['maps'][0]['fiofile'] in fio:
+                print('Data was already there')
             else:
                 data['data']['maps'].append(appdata)
         if 'roi' in field:
             data['rois'].append(gui_data.ROI(*roi))
-        with open(file.split('.')[0]+'_appended.json', 'w') as f:
+        new_filename = self.current_grain_state_json
+        if test:
+            new_filename = self.current_grain_state_json.split('.')[0]+'_appended.json'
+        with open(new_filename, 'w') as f:
             json.dump(data, f)
-        return data
+        if test:
+            return data
+        self._last_exp_state = self.M.experiment_state
     
 
     def _appendPos(self, y=None, z=None, o=None):
@@ -847,9 +924,10 @@ class Grain(object):
         self.M.write_log(f'Horizontal centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
-            self.M.set_slit_size(FOCUSEDBEAM)
+            self.M.move_lenses(beamshape='vertical')
         else:
-            self.M.set_slit_size(VERTICALBEAM)
+            self.M.move_lenses(beamshape='nofocus')
+        self.M.set_slit_size(VERTICALBEAM)
 
         if channel == 5:
             self.M.Lambda.StopAcq()
@@ -937,9 +1015,10 @@ class Grain(object):
         self.M.write_log(f'Vertical centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
-            self.M.set_slit_size(FOCUSEDBEAM)
+            self.M.move_lenses(beamshape='horizontal')
         else:
-            self.M.set_slit_size(HORIZONTALBEAM)
+            self.M.move_lenses(beamshape='nofocus')
+        self.M.set_slit_size(HORIZONTALBEAM)
 
         if channel == 5:
             self.M.Lambda.StopAcq()
@@ -1015,7 +1094,7 @@ class Grain(object):
         self.M.write_log(f'Angular centering with detector: {CHANNELS[channel]}')
         # move slits:
         if focus:
-            self.M.set_slit_size(FOCUSEDBEAM)
+            self.M.move_lenses(beamshape='nofocus')
         else:
             self.M.set_slit_size(LARGEBEAM)
 
@@ -1104,7 +1183,7 @@ class Grain(object):
             self.M.logger.logNow()
 
 
-    def recordMap(self, start, end, NoSteps, exposure, channel=2, showFig=True, fit=False, fish=11):
+    def recordMap(self, start, end, NoSteps, exposure, channel=1, showFig=True, fit=False, fish=11):
         if exposure is None:
             raise ValueError('Exposure time not given')
         self.M.set_slit_size(LARGEBEAM)
@@ -1144,7 +1223,7 @@ class Grain(object):
             self.fitpars.append({'cen': '?', 'fwhm': '?'})
             self.M.logger.logNow()
 
-        self.append_to_grain_state_json(self.current_grain_state_json, 'map', fio=fio)
+#        self.append_to_grain_state_json(self.current_grain_state_json, 'map', fio=fio)
 
 
     def recordMapRelative(self, span, noSteps, exposure=None, channel=2):
@@ -1193,7 +1272,7 @@ class Grain(object):
 
 
 
-    def showMap(self, fiofile, maxint, channel=2, **kwargs):
+    def showMap(self, fiofile, maxint, channel=1, **kwargs):
         _func.showMap(fiofile, roi=self.cROIs[str(channel)], maxint=maxint, **kwargs)
 
 
@@ -1223,10 +1302,10 @@ class Grain(object):
         counters = {}
         counters['crosshead'] = PT.AttributeProxy('hasep21eh3:10000/p21/motor/eh3_u4.15/Position')
         counters['idty2'] = PT.AttributeProxy('hasep21eh3:10000/p21/motor/eh3_u1.05/Position')
-        counters['loadcell'] = PT.AttributeProxy('hasep21eh3:10000/p21/keithley2602b/eh3_1.01/MeasVoltage')
-        counters['load'] = PT.AttributeProxy('hasep21eh3:10000/p21/VcExecutor/load/counts')
-        counters['strg1'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff/card3/channel1')
-        counters['strg2'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff/card4/channel1')
+        counters['loadcell'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff2/card2/channel1')
+        counters['load'] = PT.AttributeProxy('hasep21eh3:10000/p21/loadheightctrl/eh3/Load')
+        counters['strg1'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff2/card3/channel1')
+        counters['strg2'] = PT.AttributeProxy('hasep21eh3:10000/p21/beckhoff2/card4/channel1')
     
         crosshead = PT.DeviceProxy('hasep21eh3:10000/p21/motor/eh3_u4.15')
         chspeed = crosshead.slewRate / 266.5
@@ -1246,8 +1325,8 @@ class Grain(object):
         with open(logfile, 'a') as log:
             log.write('# %s\n' % time.asctime())
             log.write('# crosshead speed: %.2f um/s\n' % chspeed)
-            log.write('# strg1 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff/card3').ScaleFactor)
-            log.write('# strg2 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff/card4').ScaleFactor)
+            log.write('# strg1 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff2/card3').ScaleFactor)
+            log.write('# strg2 scale factor: %.3f\n' % PT.DeviceProxy('hasep21eh3:10000/p21/beckhoff2/card4').ScaleFactor)
             log.write('# timestamp ')
             for kk in list(counters.keys()):
                 log.write('%s ' % kk)
@@ -1273,8 +1352,9 @@ class Grain(object):
             if idty2pos != []:
                 #self.warning(f'Would correct idty2 with {self.idty2pos[i]}')
                 _ = HU.runMacro('umvr idty2 %.4f' % idty2pos[i])
-            self.recordMap(start, end, steps, exposure=exp, channel=2, showFig=False, fit=False)
+            self.recordMap(start, end, steps, exposure=exp, channel=1, showFig=False, fit=False)
             write_log_line(self)
+            time.sleep(1)
 
 
     def measure_fatigue_cycles(self, Ostart, Oend, Osteps, exp, singleCycleLog, posfile, fatCycles, fatBunches, fatLogf, fatSpeed):
@@ -1297,9 +1377,11 @@ class Grain(object):
         
         for b in range(fatBunches):
             self.fatigue(chpsMin, chpsMax, fatCycles, 1, fatLogf, speed=fatSpeed)
+            time.sleep(1)
             logf = singleCycleLog + '_%03d' % (b+1)
             _func.set_crosshead_speed(10)
-            self.record_load_cycle(Ostart, Oend, Osteps, exp, logf, posfile)
+            self.record_load_cycle(Ostart, Oend, Osteps, exp, logf, posfile)  # this already sleeps a sec, but better safe than sorry...
+            time.sleep(1)
 
         
 

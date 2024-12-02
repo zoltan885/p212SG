@@ -1142,7 +1142,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
     th_ax = fig.add_subplot(grid[-1, 0])
     th_ax.set_xlabel('theta [pix]')
 
-    #y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
+    y_hist.plot(np.sum(azimutalMap[:, ::-1], axis=1), omega)
 
     if maxint is None:
         print('Using %.0f percentile as max' % percentile)
@@ -1185,7 +1185,7 @@ def showMap(fiofile, roi=None, etascale=False, maxint=None, percentile=98, save=
             for i in range(azimutalMap.shape[1]):
                 meta.write('%i %.2f'%(i,1000*i*0.055/dist))
 
-    fig.colorbar(plot)
+    #fig.colorbar(plot)
     plt.show()
 
 def fatigue(chstart, chend, cycles, bunches, logf, speed=10):
@@ -1207,6 +1207,6 @@ def fatigue2(chstart, chend, cycles, bunches, logf, speed=10):
 
 def set_crosshead_speed(speed):
     crosshead = PT.DeviceProxy('hasep21eh3:10000/p21/motor/eh3_u4.15')
-    crosshead.slewRate = 266.5 * speed
+    crosshead.slewRate = int(266.5 * speed)
     print(f'Crosshead speed set to {speed}')
 
